@@ -168,7 +168,12 @@ const EFFORT_MINUTES = {
     'inventory:low_inventory_fee_risk': 30, // create an FBA shipment
     'inventory:fba_fee_increase': 20,       // check dimensions, open a case
     'inventory:handling_time_long': 5,      // change one offer setting
-    'inventory:new_seller_on_brand': 15     // check the seller, test buy if unknown
+    'inventory:new_seller_on_brand': 15,    // check the seller, test buy if unknown
+    // Spreadsheet alignment
+    'ranking:listing_errors': 10,           // fix the field Amazon flagged
+    'ranking:backend_keywords_title_overlap': 3,
+    'ranking:backend_keywords_underused': 10,  // add synonyms and alternate terms
+    'ranking:titleresult_too_short': 10        // add searched details to the title
 };
 
 /**
@@ -280,6 +285,12 @@ const IMPACT_WEIGHT = {
     'ranking:duplicate_words': 45, // retired errorType
     'ranking:backend_keywords_char_limit': 36,
     'ranking:backend_keywords_duplicate_words': 36,
+    'ranking:backend_keywords_title_overlap': 30,
+    // Spreadsheet P4: worth doing, never ahead of a real problem.
+    'ranking:backend_keywords_underused': 14,
+    'ranking:titleresult_too_short': 16,
+    // Amazon itself flagged it, and unfixed it can lead to suppression (spreadsheet P2).
+    'ranking:listing_errors': 66,
     'ranking:bulletpoints_char_limit': 35,
     'ranking:bulletpoints_restricted_words': 35,
     'ranking:bulletpoints_special_characters': 35,

@@ -41,7 +41,9 @@ const KPI_SOURCES = Object.freeze({
     'inventory:low_inventory_fee_risk': 'kpi.lowInventoryFee',
     'inventory:fba_fee_increase': 'kpi.fbaFeeIncrease',
     'inventory:handling_time_long': 'kpi.handlingTime',
-    'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand'
+    'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand',
+    // Alignment of an existing check (runs without a wave flag)
+    'ranking:listing_errors': 'kpi.listingErrors'
 });
 
 const safely = (name, context, fn) => {
@@ -95,9 +97,21 @@ function windowPhrase(startDate, endDate, days, recent) {
  * @returns {{tasks: Array, coverage: Object}}
  */
 function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country = null, userId = null, now = new Date() } = {}) {
+    // Spreadsheet alignment of existing checks: these replace an older check, so they
+    // run for every account, waves or not. Amazon's own ERROR flags on listings take
+    // over from our restricted-word list (now a review flag only).
+    const allProducts = Array.isArray(data?.TotalProducts) ? data.TotalProducts : [];
+    const allByAsin = new Map();
+    for (const p of allProducts) if (p?.asin && !allByAsin.has(p.asin)) allByAsin.set(p.asin, p);
+    const aligned = safely('listing_errors', { userId, country }, () => W3.detectListingErrors({ products: allProducts, productsByAsin: allByAsin }));
+    const alignedResult = {
+        tasks: aligned.tasks,
+        coverage: { [KPI_SOURCES['ranking:listing_errors']]: aligned.covered }
+    };
+
     const inputs = data?.KpiInputs;
     if (!inputs || !Array.isArray(inputs.waves) || inputs.waves.length === 0) {
-        return { tasks: [], coverage: {} };
+        return { ...alignedResult, staleSources: [] };
     }
     const waveOn = (n) => inputs.waves.includes(n);
 
@@ -143,8 +157,8 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, country
 
     // Wave 1 always runs (its out-of-stock and suppression verdicts feed the waves
     // after it) but only adds tasks and coverage when wave 1 itself is on.
-    const tasks = [];
-    const coverage = {};
+    const tasks = [...alignedResult.tasks];
+    const coverage = { ...alignedResult.coverage };
     const add = (result, ...types) => {
         tasks.push(...result.tasks);
         for (const type of types) coverage[KPI_SOURCES[type]] = result.covered;

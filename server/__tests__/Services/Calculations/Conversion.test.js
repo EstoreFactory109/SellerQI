@@ -15,13 +15,13 @@ const {
 
 describe('Conversion Calculations', () => {
   describe('checkNumberOfImages', () => {
-    // One threshold everywhere: tasks said 7, the ESF report said 5.
-    it('should return error when less than 5 images', () => {
+    // One threshold everywhere; tasks-logics.xlsx: fewer than 7 images.
+    it('should return error when less than 7 images', () => {
       const images = ['img1.jpg', 'img2.jpg', 'img3.jpg'];
       const result = checkNumberOfImages(images);
 
       expect(result.status).toBe('Error');
-      expect(result.Message).toContain('fewer than 5 images');
+      expect(result.Message).toContain('fewer than 7 images');
       expect(result.MainImage).toBe('img1.jpg');
     });
 
@@ -48,9 +48,9 @@ describe('Conversion Calculations', () => {
       expect(result.MainImage).toBeUndefined();
     });
 
-    it('treats exactly 4 images as an error and exactly 5 as enough', () => {
-      expect(checkNumberOfImages(Array(4).fill('img.jpg')).status).toBe('Error');
-      expect(checkNumberOfImages(Array(5).fill('img.jpg')).status).toBe('Success');
+    it('treats exactly 6 images as an error and exactly 7 as enough', () => {
+      expect(checkNumberOfImages(Array(6).fill('img.jpg')).status).toBe('Error');
+      expect(checkNumberOfImages(Array(7).fill('img.jpg')).status).toBe('Success');
     });
 
     it('treats a missing image array as no data, not as zero images', () => {
@@ -97,8 +97,21 @@ describe('Conversion Calculations', () => {
       const result = checkStarRating(4.2);
 
       expect(result.status).toBe('Error');
-      expect(result.Message).toContain('below 4.3 stars');
+      expect(result.Message).toContain('rated 4.2 stars, below 4.3');
       expect(result.HowToSolve).toContain('Investigate the causes');
+    });
+
+    // tasks-logics.xlsx: under 4.0 is the serious tier; judged on 20+ ratings only.
+    it('names the serious tier under 4.0', () => {
+      const result = checkStarRating(3.8, 120);
+      expect(result.status).toBe('Error');
+      expect(result.Message).toContain('below 4.0');
+      expect(result.Message).toContain('4 stars & up');
+    });
+
+    it('does not judge a rating on fewer than 20 ratings', () => {
+      expect(checkStarRating(3.1, 12).status).toBe('NoData');
+      expect(checkStarRating(3.1, 20).status).toBe('Error');
     });
 
     it('should return success when rating 4.3 or above', () => {

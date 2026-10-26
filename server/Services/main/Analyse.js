@@ -174,7 +174,7 @@ class AnalyseService {
 
         // Process conversion and ranking data
         stepStart = Date.now();
-        const conversionData = this.processConversionData(SellerAccount, allData);
+        const conversionData = this.processConversionData(SellerAccount, allData, sellerCentral?.brand);
         result.RankingsData = conversionData.rankingsData;
         result.ConversionData = conversionData.conversionData;
         result.Defaulters = conversionData.defaulters;
@@ -977,7 +977,7 @@ class AnalyseService {
     /**
      * Process conversion and ranking data
      */
-    static processConversionData(SellerAccount, allData) {
+    static processConversionData(SellerAccount, allData, accountBrand = '') {
         const safeProductReviews = allData.numberOfProductReviews || { Products: [] };
         const safeListingItems = allData.GetlistingAllItems || { GenericKeyword: [] };
         const safeAplusResponse = allData.aplusResponse || { ApiContentDetails: [] };
@@ -1028,12 +1028,20 @@ class AnalyseService {
         const imageResultArray = [], videoResultArray = [],
               productStarRatingResultArray = [], RankingResultArray = [], BackendKeywordResultArray = [];
 
+        // Per-ASIN brand (weekly listing sync), else the account's brand: a special
+        // character that is part of the brand name is allowed in a title.
+        const brandByAsin = new Map();
+        for (const p of SellerAccount.products || []) if (p?.asin && p.brand && !brandByAsin.has(p.asin)) brandByAsin.set(p.asin, p.brand);
+        // Titles, so backend keywords can be checked for words the title already has.
+        const titleByAsin = new Map();
+
         safeProductReviews.Products.forEach(product => {
+            if (product?.asin && product.product_title) titleByAsin.set(product.asin, product.product_title);
             if (!DefaulterList.ProductReviews.includes(product.asin)) {
                 const imageResult = checkNumberOfImages(product.product_photos);
                 const videoResult = checkIfVideoExists(product.video_url);
                 const productStarRatingResult = checkStarRating(product.product_star_ratings, product.product_num_ratings);
-                const rankings = getRankings(product);
+                const rankings = getRankings(product, { brand: brandByAsin.get(product.asin) || accountBrand || '' });
                 if (product.asin) scraped.add(product.asin);
 
                 // "No data" (no reviews yet, no image data) must not cost a product its
@@ -1053,7 +1061,7 @@ class AnalyseService {
         safeListingItems.GenericKeyword.forEach(item => {
             const asin = item.asin;
             if (!DefaulterList.ListingAllItems.includes(asin)) {
-                const keywordStatus = BackendKeyWordOrAttributesStatus(item.value);
+                const keywordStatus = BackendKeyWordOrAttributesStatus(item.value, { title: titleByAsin.get(asin) || '' });
                 // Errors only (a short-keywords Warning is not counted in
                 // NumberOfErrors), and never re-adds: one SKU's clean keywords
                 // must not undo another check's verdict.

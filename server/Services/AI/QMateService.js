@@ -3427,7 +3427,7 @@ class QMateService {
             const validTitles = [];
             const invalidTitles = [];
             for (const title of suggestedTitle) {
-                const titleCheck = checkTitle(title);
+                const titleCheck = checkTitle(title, { strict: true });
                 if (!titleCheck || titleCheck.NumberOfErrors === 0) {
                     validTitles.push(title);
                 } else {
@@ -3451,7 +3451,7 @@ class QMateService {
             ? parsed.suggested_bullet_points.filter((s) => typeof s === 'string')
             : [];
         if (suggestedBulletPoints.length > 0) {
-            const bulletCheck = checkBulletPoints(suggestedBulletPoints);
+            const bulletCheck = checkBulletPoints(suggestedBulletPoints, { strict: true });
             const errCount = bulletCheck.NumberOfErrors || 0;
             const validationNote =
                 errCount === 0
@@ -4401,7 +4401,7 @@ class QMateService {
                 const validTitles = [];
                 const invalidTitles = [];
                 for (const title of suggestedTitle) {
-                    const titleCheck = checkTitle(title);
+                    const titleCheck = checkTitle(title, { strict: true });
                     if (!titleCheck || titleCheck.NumberOfErrors === 0) {
                         validTitles.push(title);
                     } else {
@@ -4425,7 +4425,7 @@ class QMateService {
                 ? parsed.suggested_bullet_points.filter((s) => typeof s === 'string')
                 : [];
             if (suggestedBulletPoints.length > 0) {
-                const bulletCheck = checkBulletPoints(suggestedBulletPoints);
+                const bulletCheck = checkBulletPoints(suggestedBulletPoints, { strict: true });
                 const errCount = bulletCheck.NumberOfErrors || 0;
                 const validationNote =
                     errCount === 0

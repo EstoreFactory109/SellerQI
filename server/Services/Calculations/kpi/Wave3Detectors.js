@@ -29,23 +29,27 @@ const num = (v) => {
 };
 
 /**
- * Listing warnings. Spreadsheet: any issue with severity WARNING (non-blocking, can
- * turn into a block). Read from the catalogue rows, where the weekly listing sync
- * stores each SKU's issues. Covered once any SKU in the marketplace carries the
- * field, i.e. the sync has run since it started storing them.
+ * Amazon's own issues on listings, grouped: shared by listing warnings (severity
+ * WARNING) and listing errors (severity ERROR). Read from the catalogue rows, where
+ * the listing syncs store each SKU's issues (active SKUs weekly, inactive daily).
+ * Covered once any SKU in the marketplace carries the field.
+ *
+ * One cause, one task: the same message on LISTING_WARNING_GROUP_MIN+ listings (seen:
+ * one rejected compliance document behind 2,041 listings' warnings) is a single
+ * grouped task naming how many listings carry it.
  */
-function detectListingWarnings({ products = [], productsByAsin = new Map() }) {
+function detectListingIssues({ products = [], productsByAsin = new Map(), severity, errorCategory, errorType, text, skip = () => false }) {
     const synced = (products || []).some(p => Array.isArray(p?.listingIssues));
     if (!synced) return { tasks: [], covered: false };
     const byAsin = new Map();
     const asinsByMessage = new Map();
     for (const p of products || []) {
         if (!p?.asin || !Array.isArray(p.listingIssues)) continue;
-        const warnings = p.listingIssues.filter(i => String(i?.severity || '').toUpperCase() === 'WARNING');
-        if (warnings.length === 0) continue;
+        const issues = p.listingIssues.filter(i => String(i?.severity || '').toUpperCase() === severity && !skip(i));
+        if (issues.length === 0) continue;
         const e = byAsin.get(p.asin) || { skus: new Set(), messages: new Set() };
         e.skus.add(p.sku);
-        for (const w of warnings) {
+        for (const w of issues) {
             if (!w.message) continue;
             const message = String(w.message).trim();
             e.messages.add(message);
@@ -56,19 +60,16 @@ function detectListingWarnings({ products = [], productsByAsin = new Map() }) {
         byAsin.set(p.asin, e);
     }
 
-    // One cause, one task: a warning on many listings (seen: one rejected compliance
-    // document behind 2,041 listings' warnings) is a single grouped task naming how
-    // many listings carry it, not one task per listing.
     const grouped = new Set([...asinsByMessage].filter(([, asins]) => asins.size >= R.LISTING_WARNING_GROUP_MIN).map(([m]) => m));
     const tasks = [];
     for (const message of grouped) {
         const asins = [...asinsByMessage.get(message)];
         tasks.push({
-            asin: `WARNING:${hashOf(message)}`,
+            asin: `${severity}:${hashOf(message)}`,
             productName: `${asins.length} listings`,
-            errorCategory: 'inventory',
-            errorType: 'listing_warnings',
-            error: `Listing Warning: Amazon has the same warning on ${asins.length} of your listings: ${message}`,
+            errorCategory,
+            errorType,
+            error: `${text.label}: Amazon has the same ${text.noun} on ${asins.length} of your listings: ${message}`,
             solution: 'This is one issue repeated across listings, so fix it once at the source: upload or correct the document or attribute Amazon asks for (Seller Central > Account Health or Inventory > Fix Your Listings), then check a few of the listings below.',
             renderData: { listings: asins.length, asins: asins.slice(0, 50), messages: [message] },
             status: PENDING
@@ -81,15 +82,49 @@ function detectListingWarnings({ products = [], productsByAsin = new Map() }) {
         tasks.push({
             asin,
             productName: nameOf(productsByAsin, asin),
-            errorCategory: 'inventory',
-            errorType: 'listing_warnings',
-            error: `Listing Warning: Amazon has ${messages.length === 1 ? 'a warning' : `${messages.length} warnings`} on this listing: ${messages.slice(0, 3).join(' | ') || 'see the listing in Seller Central'}.`,
-            solution: 'Open the listing in Seller Central (Inventory > Manage All Inventory > Edit) and update the flagged field before Amazon turns the warning into a block.',
+            errorCategory,
+            errorType,
+            error: `${text.label}: Amazon has ${messages.length === 1 ? `a ${text.noun}` : `${messages.length} ${text.noun}s`} on this listing: ${messages.slice(0, 3).join(' | ') || 'see the listing in Seller Central'}.`,
+            solution: text.solution,
             renderData: { skus: [...e.skus], messages: messages.slice(0, 10) },
             status: PENDING
         });
     }
     return { tasks, covered: true };
+}
+
+/**
+ * Listing warnings. Spreadsheet: any issue with severity WARNING (non-blocking, can
+ * turn into a block).
+ */
+function detectListingWarnings({ products = [], productsByAsin = new Map() }) {
+    return detectListingIssues({
+        products, productsByAsin,
+        severity: 'WARNING', errorCategory: 'inventory', errorType: 'listing_warnings',
+        text: {
+            label: 'Listing Warning',
+            noun: 'warning',
+            solution: 'Open the listing in Seller Central (Inventory > Manage All Inventory > Edit) and update the flagged field before Amazon turns the warning into a block.'
+        }
+    });
+}
+
+/**
+ * Restricted words and claims (title, bullets, description). Spreadsheet: any listing
+ * issue with severity ERROR is the task; our own claims list is only a review flag.
+ * Issues that ARE the suppression are left to the suppressed-listing task.
+ */
+function detectListingErrors({ products = [], productsByAsin = new Map() }) {
+    return detectListingIssues({
+        products, productsByAsin,
+        severity: 'ERROR', errorCategory: 'ranking', errorType: 'listing_errors',
+        skip: (issue) => issue?.isSuppression === true,
+        text: {
+            label: 'Listing Error',
+            noun: 'flag',
+            solution: 'Update the flagged field so it meets Amazon\'s policy, following Amazon\'s message (Inventory > Fix Your Listings). Unfixed errors can lead to the listing being suppressed.'
+        }
+    });
 }
 
 /**
@@ -282,6 +317,8 @@ function detectNewSellerOnBrand({ brandOffers, productsByAsin = new Map(), now }
 }
 
 module.exports = {
+    detectListingErrors,
+    detectListingIssues,
     detectNewSellerOnBrand,
     detectLongHandlingTime,
     detectListingWarnings,

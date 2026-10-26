@@ -8,6 +8,7 @@ const {
   checkDescription,
   BackendKeyWordOrAttributesStatus,
   TITLE_MAX_LENGTH,
+  TITLE_MIN_RECOMMENDED_LENGTH,
   TITLE_PROHIBITED_CHARACTERS,
   TITLE_CONTEXTUAL_CHARACTERS,
   TITLE_RESTRICTED_PHRASES,
@@ -310,7 +311,7 @@ You are an expert Amazon listing copywriter. Your output must satisfy the EXACT 
 
 1. CHARACTER LENGTH
    - The product title MUST NOT exceed ${TITLE_MAX_LENGTH} characters, including spaces. This is Amazon's hard limit.
-   - Aim for 60-${TITLE_MAX_LENGTH} characters. Titles over the limit are truncated on mobile, can be automatically corrected, and may be kept out of search results.
+   - Aim for ${TITLE_MIN_RECOMMENDED_LENGTH}-${TITLE_MAX_LENGTH} characters: under ${TITLE_MIN_RECOMMENDED_LENGTH} leaves out words shoppers search for. Titles over the limit can be automatically corrected and may be kept out of search results.
    - Order the information as: brand, flavor or style, product type, key attribute, color, size or pack count, model number.
    - Drop non-essential detail rather than exceeding the limit. Do not pad the title to reach a length.
 
@@ -487,7 +488,7 @@ Generate three improved titles that obey all rules.
   const rejectedWords = new Set();
   const rejectionReasons = new Set();
   for (const t of cleanTitles) {
-    const validation = checkTitle(t);
+    const validation = checkTitle(t, { strict: true });
     if (!validation || validation.NumberOfErrors === 0) {
       validTitles.push(t);
     } else {
@@ -533,7 +534,7 @@ ${avoidList ? `- Do NOT contain any of: ${avoidList}.` : ''}
       cleanTitles = titles.map(t => String(t || '').trim()).filter(Boolean);
       validTitles = [];
       for (const t of cleanTitles) {
-        const validation = checkTitle(t);
+        const validation = checkTitle(t, { strict: true });
         if (!validation || validation.NumberOfErrors === 0) {
           validTitles.push(t);
         } else {
@@ -629,7 +630,7 @@ Generate 5 new bullet points for this product based on the title above. Each bul
   }
 
   // Validate against ranking rules (expects array of strings)
-  let validation = checkBulletPoints(cleanBullets);
+  let validation = checkBulletPoints(cleanBullets, { strict: true });
   
   // If validation fails, try once more with explicit feedback about the errors
   if (validation?.NumberOfErrors > 0) {
@@ -675,7 +676,7 @@ Each bullet must be at least 150 characters. Return JSON: { "bullet_points": ["b
       
       const retryCleanBullets = normalizeBulletPointsInput(retrySuggested);
       if (retryCleanBullets.length > 0) {
-        const retryValidation = checkBulletPoints(retryCleanBullets);
+        const retryValidation = checkBulletPoints(retryCleanBullets, { strict: true });
         if (!retryValidation || retryValidation.NumberOfErrors === 0) {
           logger.info('[RankingContentAI] Retry successful for bullet points', { asin });
           return retryCleanBullets;
@@ -746,7 +747,7 @@ Write a single improved description that obeys all rules.
   }
 
   // Validate against ranking rules (expects array of strings)
-  const validation = checkDescription([suggestedDescription]);
+  const validation = checkDescription([suggestedDescription], { strict: true });
   if (validation?.NumberOfErrors > 0) {
     logger.warn('[RankingContentAI] Generated description still has ranking errors', {
       asin,

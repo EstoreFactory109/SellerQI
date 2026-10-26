@@ -400,7 +400,7 @@ async function getQMateIssuesContext(userId, country, region, options = {}) {
                         howToSolve: titleResult.charLim.HowTOSolve
                     });
                 }
-                if (titleResult.RestictedWords?.status === 'Error') {
+                if (['Error', 'Warning'].includes(titleResult.RestictedWords?.status)) { // review flag since tasks-logics.xlsx; QMate still raises it
                     issueDetails.push({
                         section: 'Title',
                         type: 'restricted_words',
@@ -446,7 +446,7 @@ async function getQMateIssuesContext(userId, country, region, options = {}) {
                         howToSolve: bulletPoints.charLim.HowTOSolve
                     });
                 }
-                if (bulletPoints.RestictedWords?.status === 'Error') {
+                if (['Error', 'Warning'].includes(bulletPoints.RestictedWords?.status)) { // review flag since tasks-logics.xlsx; QMate still raises it
                     issueDetails.push({
                         section: 'Bullet Points',
                         type: 'restricted_words',
@@ -476,7 +476,7 @@ async function getQMateIssuesContext(userId, country, region, options = {}) {
                         howToSolve: description.charLim.HowTOSolve
                     });
                 }
-                if (description.RestictedWords?.status === 'Error') {
+                if (['Error', 'Warning'].includes(description.RestictedWords?.status)) { // review flag since tasks-logics.xlsx; QMate still raises it
                     issueDetails.push({
                         section: 'Description',
                         type: 'restricted_words',
@@ -673,7 +673,7 @@ function transformRankingIssues(rankingErrors) {
                 severity: 'high'
             });
         }
-        if (titleResult.RestictedWords?.status === 'Error') {
+        if (['Error', 'Warning'].includes(titleResult.RestictedWords?.status)) { // review flag since tasks-logics.xlsx; QMate still raises it
             issues.push({
                 type: 'title_restricted_words',
                 section: 'Title',
@@ -726,7 +726,7 @@ function transformRankingIssues(rankingErrors) {
                 severity: 'medium'
             });
         }
-        if (bulletPoints.RestictedWords?.status === 'Error') {
+        if (['Error', 'Warning'].includes(bulletPoints.RestictedWords?.status)) { // review flag since tasks-logics.xlsx; QMate still raises it
             issues.push({
                 type: 'bullet_restricted_words',
                 section: 'Bullet Points',
@@ -761,7 +761,7 @@ function transformRankingIssues(rankingErrors) {
                 severity: 'medium'
             });
         }
-        if (description.RestictedWords?.status === 'Error') {
+        if (['Error', 'Warning'].includes(description.RestictedWords?.status)) { // review flag since tasks-logics.xlsx; QMate still raises it
             issues.push({
                 type: 'description_restricted_words',
                 section: 'Description',

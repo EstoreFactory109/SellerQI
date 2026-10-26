@@ -1974,18 +1974,32 @@ const analyseData = async (data, userId = null, options = {}) => {
     // How old the AI views must be before this change regenerates them. 0 for a full
     // build; reconcile asks for more so routine drift does not buy an LLM call daily.
     let taskAiRefreshMinIntervalHours = 0;
+    // The detected issues every task comes from. Built once: persisted below, or, for
+    // a preview (persistTasks: false), turned into the task list without writing.
+    const taskSources = {
+        rankingProductWiseErrors: rankingProductWiseErrors,
+        conversionProductWiseErrors: conversionProductWiseErrors,
+        inventoryProductWiseErrors: inventoryProductWiseErrors,
+        profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
+        sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
+        AccountErrors: data.AccountData?.accountHealth || {},
+        kpiTasks: kpiResult.tasks,
+        TotalProducts: TotalProducts
+    };
+    let previewTasks;
+    if (!persistTasks) {
+        try {
+            previewTasks = CreateTaskService.generateAllTasks(taskSources);
+        } catch (error) {
+            logger.error('Error generating preview tasks:', { message: error.message });
+        }
+    }
+
     if (userId && persistTasks) {
         try {
             logger.info(`Creating tasks for user: ${userId}`);
             const taskResult = await CreateTaskService.createTasksFromCalculateServiceData(userId, {
-                rankingProductWiseErrors: rankingProductWiseErrors,
-                conversionProductWiseErrors: conversionProductWiseErrors,
-                inventoryProductWiseErrors: inventoryProductWiseErrors,
-                profitabilityErrorDetails: profitabilityErrorsData.errorDetails,
-                sponsoredAdsErrorDetails: sponsoredAdsErrorsData.errorDetails,
-                AccountErrors: data.AccountData?.accountHealth || {},
-                kpiTasks: kpiResult.tasks,
-                TotalProducts: TotalProducts,
+                ...taskSources,
                 forceReconcile: forceTaskReconcile,
                 coverage: {
                     ...buildTaskCoverage(data, {
@@ -2021,7 +2035,8 @@ const analyseData = async (data, userId = null, options = {}) => {
     logger.info(`[PERF] DashboardCalculation TOTAL time: ${totalCalcTime}ms`);
     logger.info("=== DashboardCalculation: Returning dashboard data ===");
     // kpiTasks is for previews (persistTasks: false); page callers read dashboardData only.
-    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours, kpiTasks: kpiResult.tasks, kpiStaleSources: kpiResult.staleSources || [] };
+    // kpiTasks / previewTasks are for previews (persistTasks: false); page callers read dashboardData only.
+    return { dashboardData, tasksRebuilt, taskAiRefreshMinIntervalHours, kpiTasks: kpiResult.tasks, kpiStaleSources: kpiResult.staleSources || [], previewTasks };
 };
 
 module.exports = {

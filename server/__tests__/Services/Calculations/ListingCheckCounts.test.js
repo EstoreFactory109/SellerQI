@@ -43,25 +43,27 @@ describe('findDuplicateWords', () => {
 });
 
 describe('BackendKeyWordOrAttributesStatus counts', () => {
-    it('does not count an under-200-byte Warning as an error', () => {
+    // tasks-logics.xlsx: under 150 bytes is a (low-priority) error, so it counts.
+    it('counts an under-150-byte string as an error', () => {
         const result = BackendKeyWordOrAttributesStatus('short keywords');
-        expect(result.charLim.status).toBe('Warning');
-        expect(result.NumberOfErrors).toBe(0);
+        expect(result.charLim.status).toBe('Error');
+        expect(result.NumberOfErrors).toBe(1);
     });
 
     it('counts duplicates as an error and names them', () => {
         const result = BackendKeyWordOrAttributesStatus('mug mug');
         expect(result.dublicateWords.status).toBe('Error');
         expect(result.dublicateWords.Message).toContain('mug');
-        expect(result.NumberOfErrors).toBe(1);
+        expect(result.NumberOfErrors).toBe(2); // short + duplicates
     });
 });
 
 describe('dashboard ranking count == ranking tasks', () => {
     const product = (asin, overrides = {}) => ({
         asin,
-        product_title: 'Acme Ceramic Coffee Mug, 12 oz, Blue',
-        about_product: ['A'.repeat(160)],
+        // 80+ characters and five full bullets: clean under the spreadsheet's rules.
+        product_title: 'Acme Ceramic Coffee Mug, 12 oz, Blue, Dishwasher and Microwave Safe Stoneware Cup',
+        about_product: Array.from({ length: 5 }, (_, i) => `Bullet ${i} ` + 'A'.repeat(160)),
         product_description: ['A'.repeat(1800)],
         ...overrides,
     });
@@ -90,7 +92,7 @@ describe('dashboard ranking count == ranking tasks', () => {
                 product('A3'),
             ],
             backend: [
-                ['A1', 'short keywords'],             // Warning only: no error, no task
+                ['A1', 'short keywords'],             // under 150 bytes: a low-priority task
                 ['A2', `${goodKeywords} kw000`],      // duplicate: error and task
                 // One ASIN, two SKUs: one clean row and one over the limit.
                 ['A3', goodKeywords],
@@ -98,12 +100,12 @@ describe('dashboard ranking count == ranking tasks', () => {
             ],
         });
 
+        // Claims ("anxiety", "germs") are a review flag now, not a task.
         expect(tasks.map((t) => `${t.asin}:${t.errorType}`).sort()).toEqual([
+            'A1:backend_keywords_underused',
             'A1:bulletpoints_char_limit',
-            'A1:bulletpoints_restricted_words',
             'A2:backend_keywords_duplicate_words',
             'A2:description_char_limit',
-            'A2:description_restricted_words',
             'A3:backend_keywords_char_limit',
             'A3:backend_keywords_duplicate_words',
         ]);
@@ -122,6 +124,20 @@ describe('dashboard ranking count == ranking tasks', () => {
         expect(tasks).toHaveLength(2);
         expect(row.errors).toBe(2);
         expect(dashboardData.first).toMatchObject({ asin: 'A1', errors: 2 });
+    });
+
+    // tasks-logics.xlsx P4 vs P3: a short title is its own, low-weight task type.
+    it('gives a short title its own task type, apart from an over-limit one', async () => {
+        const { tasks } = await run({
+            active: ['A1', 'A2'],
+            ranking: [
+                product('A1', { product_title: 'Acme Coffee Mug, 12 oz, Blue' }),
+                product('A2', { product_title: 'Acme Ceramic Coffee Mug '.repeat(10) }),
+            ],
+            backend: [],
+        });
+        expect(tasks.filter((t) => t.errorType.startsWith('titleresult_')).map((t) => `${t.asin}:${t.errorType}`).sort())
+            .toEqual(['A1:titleresult_too_short', 'A2:titleresult_char_limit', 'A2:titleresult_word_repetition']);
     });
 
     it('labels the duplicate-words task as backend keywords, not title', async () => {

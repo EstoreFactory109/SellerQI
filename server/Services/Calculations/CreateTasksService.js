@@ -271,6 +271,73 @@ const renderBuyBoxTaskText = (renderData = {}) => {
  */
 class CreateTaskService {
     /**
+     * Every task the detected issues produce, without ids or writes. Shared by
+     * createTasksFromErrors and previews (analyseData with persistTasks: false).
+     * @param {Object} data - the same error arrays createTasksFromErrors takes
+     * @returns {Array} task records
+     */
+    generateAllTasks(data) {
+        const productNameMap = new Map();
+        if (Array.isArray(data.TotalProducts)) {
+            data.TotalProducts.forEach(product => {
+                if (product.asin) {
+                    const name = product.itemName || product.title || product.productName || product.name || null;
+                    if (name) {
+                        productNameMap.set(product.asin, name);
+                    }
+                }
+            });
+        }
+        
+        const tasks = [];
+        
+        if (data.rankingProductWiseErrors) {
+            tasks.push(...this.generateRankingTasks(data.rankingProductWiseErrors));
+        }
+        
+        if (data.conversionProductWiseErrors) {
+            tasks.push(...this.generateConversionTasks(data.conversionProductWiseErrors));
+        }
+        
+        if (data.inventoryProductWiseErrors) {
+            tasks.push(...this.generateInventoryTasks(data.inventoryProductWiseErrors));
+        }
+        
+        if (data.profitabilityErrorDetails) {
+            tasks.push(...this.generateProfitabilityTasks(data.profitabilityErrorDetails, productNameMap));
+        }
+        
+        if (data.sponsoredAdsErrorDetails) {
+            tasks.push(...this.generateSponsoredAdsTasks(data.sponsoredAdsErrorDetails, productNameMap));
+        }
+        
+        if (data.AccountErrors) {
+            tasks.push(...this.generateAccountTasks(data.AccountErrors));
+        }
+
+        // tasks-logics.xlsx detectors (kpi/): already task-shaped, with their own text.
+        if (Array.isArray(data.kpiTasks)) {
+            // An empty shelf is one problem: the out-of-stock task (with its lost
+            // sales) replaces the product's replenishment tasks, which Amazon's
+            // restock alert also raises for out-of-stock SKUs.
+            const outOfStock = new Set(data.kpiTasks
+                .filter(t => t.errorCategory === 'inventory' && t.errorType === 'out_of_stock')
+                .map(t => t.asin));
+            if (outOfStock.size > 0) {
+                for (let i = tasks.length - 1; i >= 0; i--) {
+                    const t = tasks[i];
+                    if (t.errorCategory === 'inventory' && outOfStock.has(t.asin)
+                        && normalizeErrorType(t.errorType) === 'replenishment_needed') {
+                        tasks.splice(i, 1);
+                    }
+                }
+            }
+            tasks.push(...data.kpiTasks.map(task => ({ status: TaskStatus.PENDING, ...task })));
+        }
+        return tasks;
+    }
+
+    /**
      * Main method to create tasks from all error categories
      * 
      * OPTIMIZED: Tasks are now stored in the TaskItem collection (one document per task)
@@ -286,67 +353,8 @@ class CreateTaskService {
             // built from the others' products.
             const { userId, country = null, region = null } = data;
             const scope = country && region ? ` [${country}-${region}]` : '';
-            
-            // Create a product name map from TotalProducts for quick lookup
-            const productNameMap = new Map();
-            if (Array.isArray(data.TotalProducts)) {
-                data.TotalProducts.forEach(product => {
-                    if (product.asin) {
-                        const name = product.itemName || product.title || product.productName || product.name || null;
-                        if (name) {
-                            productNameMap.set(product.asin, name);
-                        }
-                    }
-                });
-            }
-            
-            // Generate tasks from all error categories
-            const tasks = [];
-            
-            if (data.rankingProductWiseErrors) {
-                tasks.push(...this.generateRankingTasks(data.rankingProductWiseErrors));
-            }
-            
-            if (data.conversionProductWiseErrors) {
-                tasks.push(...this.generateConversionTasks(data.conversionProductWiseErrors));
-            }
-            
-            if (data.inventoryProductWiseErrors) {
-                tasks.push(...this.generateInventoryTasks(data.inventoryProductWiseErrors));
-            }
-            
-            if (data.profitabilityErrorDetails) {
-                tasks.push(...this.generateProfitabilityTasks(data.profitabilityErrorDetails, productNameMap));
-            }
-            
-            if (data.sponsoredAdsErrorDetails) {
-                tasks.push(...this.generateSponsoredAdsTasks(data.sponsoredAdsErrorDetails, productNameMap));
-            }
-            
-            if (data.AccountErrors) {
-                tasks.push(...this.generateAccountTasks(data.AccountErrors));
-            }
 
-            // tasks-logics.xlsx detectors (kpi/): already task-shaped, with their own text.
-            if (Array.isArray(data.kpiTasks)) {
-                // An empty shelf is one problem: the out-of-stock task (with its lost
-                // sales) replaces the product's replenishment tasks, which Amazon's
-                // restock alert also raises for out-of-stock SKUs.
-                const outOfStock = new Set(data.kpiTasks
-                    .filter(t => t.errorCategory === 'inventory' && t.errorType === 'out_of_stock')
-                    .map(t => t.asin));
-                if (outOfStock.size > 0) {
-                    for (let i = tasks.length - 1; i >= 0; i--) {
-                        const t = tasks[i];
-                        if (t.errorCategory === 'inventory' && outOfStock.has(t.asin)
-                            && normalizeErrorType(t.errorType) === 'replenishment_needed') {
-                            tasks.splice(i, 1);
-                        }
-                    }
-                }
-                tasks.push(...data.kpiTasks.map(task => ({ status: TaskStatus.PENDING, ...task })));
-            }
-
+            const tasks = this.generateAllTasks(data);
             for (const task of tasks) {
                 task.taskId = stableTaskId(userId, country, region, task);
             }
@@ -674,12 +682,14 @@ class CreateTaskService {
                     const check = section[key];
                     if (check?.status !== 'Error') return;
 
+                    // A short title is the low-priority side of the length check.
+                    const type = key === 'charLim' && check.kind === 'short' ? 'too_short' : errorType;
                     tasks.push({
                         taskId: generateTaskId(),
                         productName,
                         asin,
                         errorCategory: 'ranking',
-                        errorType: `${sectionKey.toLowerCase()}_${errorType}`,
+                        errorType: `${sectionKey.toLowerCase()}_${type}`,
                         error: `${sectionLabels[sectionKey]} | ${label}: ${check.Message || fallbackMessage}`,
                         solution: check.HowTOSolve || fallbackSolution,
                         status: TaskStatus.PENDING
@@ -694,7 +704,8 @@ class CreateTaskService {
                     productName,
                     asin,
                     errorCategory: 'ranking',
-                    errorType: 'backend_keywords_char_limit',
+                    // Using too few bytes is low priority; going over the limit is not.
+                    errorType: error.data.charLim.kind === 'underused' ? 'backend_keywords_underused' : 'backend_keywords_char_limit',
                     error: `${sectionLabels.charLim}: ${error.data.charLim.Message || 'Backend keywords exceed Amazon\'s byte limit.'}`,
                     solution: error.data.charLim.HowTOSolve || 'Reduce your backend search terms to stay within Amazon\'s 249-byte limit.',
                     status: TaskStatus.PENDING
@@ -707,6 +718,20 @@ class CreateTaskService {
             // object to the string 'Error', so it never fired, and its label said
             // "Title". The errorType is new because no 'duplicate_words' task was
             // ever created under the old one.
+            // Backend words the title already has (tasks-logics.xlsx).
+            if (error.data.titleOverlap?.status === 'Error') {
+                tasks.push({
+                    taskId: generateTaskId(),
+                    productName,
+                    asin,
+                    errorCategory: 'ranking',
+                    errorType: 'backend_keywords_title_overlap',
+                    error: `${sectionLabels.charLim} | Words Already in Title: ${error.data.titleOverlap.Message}`,
+                    solution: error.data.titleOverlap.HowTOSolve,
+                    status: TaskStatus.PENDING
+                });
+            }
+
             if (error.data.dublicateWords?.status === 'Error') {
                 tasks.push({
                     taskId: generateTaskId(),

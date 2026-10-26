@@ -184,6 +184,22 @@ const GROUP_COPY = {
         title: 'Products Amazon now charges more to fulfil',
         action: 'Check the measurements and ask for a re-measure if wrong'
     },
+    'ranking:listing_errors': {
+        title: 'Listings Amazon has flagged with errors',
+        action: 'Fix the flagged field before Amazon suppresses the listing'
+    },
+    'ranking:backend_keywords_underused': {
+        title: 'Listings using little of their backend keyword space',
+        action: 'Add synonyms and alternate searches up to the 250-byte limit'
+    },
+    'ranking:titleresult_too_short': {
+        title: 'Titles too short to carry the searches shoppers use',
+        action: 'Add size, material, quantity and key use to these titles'
+    },
+    'ranking:backend_keywords_title_overlap': {
+        title: 'Backend keywords repeating words already in the title',
+        action: 'Swap those words for new searches the title does not cover'
+    },
     'inventory:new_seller_on_brand': {
         title: 'New sellers on your own brand listings',
         action: 'Check each one: authorised reseller, or test buy and report'

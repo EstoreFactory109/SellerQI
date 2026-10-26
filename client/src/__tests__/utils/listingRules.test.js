@@ -43,14 +43,15 @@ describe('Rankingsj restricted wording', () => {
       about_product: ['Backed by our guarantee, with free shipping and a discount on every order of this mug we sell'],
       product_description: ['Limited time deal'],
     });
-    expect(result.TitleResult.RestictedWords.status).toBe('Error');
+    // A review flag (Warning) since tasks-logics.xlsx, same as the server.
+    expect(result.TitleResult.RestictedWords.status).toBe('Warning');
     expect(result.BulletPoints.RestictedWords.status).toBe('Success');
     expect(result.Description.RestictedWords.status).toBe('Success');
   });
 
-  it('flags prohibited claims in every section', () => {
-    expect(checkBulletPoints(['Antibacterial coating']).RestictedWords.status).toBe('Error');
-    expect(checkDescription(['Relieves anxiety']).RestictedWords.status).toBe('Error');
+  it('flags prohibited claims in every section, for review', () => {
+    expect(checkBulletPoints(['Antibacterial coating']).RestictedWords.status).toBe('Warning');
+    expect(checkDescription(['Relieves anxiety']).RestictedWords.status).toBe('Warning');
   });
 
   it('does not find "toxic" inside "non-toxic", nor flag ordinary words', () => {
@@ -69,8 +70,8 @@ describe('Rankingsj restricted wording', () => {
     expect(result.Description.checkSpecialCharacters.status).toBe('Success');
   });
 
-  it('counts each failing bullet check once', () => {
-    expect(checkBulletPoints(['Short and cures anxiety']).NumberOfErrors).toBe(2);
+  it('counts each failing bullet check once; a claim is a review flag, not an error', () => {
+    expect(checkBulletPoints(['Short and cures anxiety']).NumberOfErrors).toBe(1);
   });
 });
 
@@ -113,22 +114,24 @@ describe('Rankingsj treats missing bullets and description as no data', () => {
   });
 
   it('counts only the title for a product with no bullets or description', () => {
-    const result = getRankings({ product_title: 'Acme Ceramic Coffee Mug', about_product: [], product_description: [''] });
+    const result = getRankings({ product_title: 'Acme Ceramic Coffee Mug, 12 oz, Blue, Dishwasher and Microwave Safe Stoneware Cup', about_product: [], product_description: [''] });
     expect(result.TotalErrors).toBe(0);
   });
 
   it('still flags real short and overlong content', () => {
     expect(checkBulletPoints(['Too short']).charLim.status).toBe('Error');
-    expect(checkBulletPoints(['x'.repeat(150)]).NumberOfErrors).toBe(0);
+    // Fewer than 5 bullets is an error too (tasks-logics.xlsx).
+    expect(checkBulletPoints(['x'.repeat(150)]).NumberOfErrors).toBe(1);
+    expect(checkBulletPoints(Array(5).fill('x'.repeat(150))).NumberOfErrors).toBe(0);
     expect(checkDescription(['Too short']).charLim.status).toBe('Error');
     expect(checkDescription(['x'.repeat(1700)]).NumberOfErrors).toBe(0);
 
     const result = getRankings({
-      product_title: 'Acme Ceramic Coffee Mug with Lid, Dishwasher Safe, Microwave Safe, Large 16 oz Size',
+      product_title: 'Acme Ceramic Coffee Mug with Lid, Dishwasher Safe, Microwave Safe, Large 16 oz Size ' + 'Extra Words '.repeat(12),
       about_product: ['Too short'],
       product_description: ['Too short'],
     });
-    expect(result.TitleResult.charLim.status).toBe('Error');
+    expect(result.TitleResult.charLim.status).toBe('Error'); // over 200
     expect(result.BulletPoints.NumberOfErrors).toBe(1);
     expect(result.Description.NumberOfErrors).toBe(1);
   });

@@ -136,7 +136,7 @@ describe('runKpiDetectors', () => {
     const baseData = (over = {}) => ({
         startDate: '2026-09-24',
         endDate: '2026-10-23',
-        TotalProducts: [{ asin: 'A1', sku: 'S1', itemName: 'Garlic Press', status: 'Inactive', quantity: 0 }],
+        TotalProducts: [{ asin: 'A1', sku: 'S1', itemName: 'Garlic Press', status: 'Inactive', quantity: 0, listingIssues: [] }],
         ProductWiseSponsoredAds: [{ asin: 'A1', date: '2026-10-22', spend: 7 }],
         BuyBoxData: { asinBuyBoxData: [] },
         KpiInputs: {
@@ -151,9 +151,14 @@ describe('runKpiDetectors', () => {
         ...over
     });
 
-    it('does nothing without KpiInputs for wave 1', () => {
-        expect(runKpiDetectors({}, { now: NOW })).toEqual({ tasks: [], coverage: {} });
-        expect(runKpiDetectors({ KpiInputs: { waves: [] } }, { now: NOW })).toEqual({ tasks: [], coverage: {} });
+    it('runs only the always-on alignment check without any wave', () => {
+        const none = { tasks: [], coverage: { 'kpi.listingErrors': false }, staleSources: [] };
+        expect(runKpiDetectors({}, { now: NOW })).toEqual(none);
+        expect(runKpiDetectors({ KpiInputs: { waves: [] } }, { now: NOW })).toEqual(none);
+        // Amazon's ERROR flags on a listing are a task whether or not a wave is on.
+        const r = runKpiDetectors({ TotalProducts: [{ asin: 'A1', sku: 'S1', listingIssues: [{ severity: 'ERROR', message: 'Missing brand' }] }] }, { now: NOW });
+        expect(r.tasks.map(t => [t.errorCategory, t.errorType])).toEqual([['ranking', 'listing_errors']]);
+        expect(r.coverage['kpi.listingErrors']).toBe(true);
     });
 
     it('chains out-of-stock into ads-on-unbuyable and reports every source covered', () => {

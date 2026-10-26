@@ -63,7 +63,7 @@ async function previewMarketplace(userId, country, region) {
     // persistTasks:false = no task writes. The userId stays, so live per-ASIN finance is read.
     const result = await analyseData(analysed.message, userId, { persistTasks: false });
     const inputs = analysed.message.KpiInputs || null;
-    return { tasks: result?.kpiTasks || [], inputs, stale: result?.kpiStaleSources || [] };
+    return { tasks: result?.kpiTasks || [], allTasks: result?.previewTasks || [], inputs, stale: result?.kpiStaleSources || [] };
 }
 
 const describeInputs = (inputs) => {
@@ -110,7 +110,7 @@ async function main() {
         for (const { country, region } of account.marketplaces) {
             const label = `${account.userId} ${country}-${region}`;
             try {
-                const { tasks, inputs, stale } = await withTimeout(previewMarketplace(account.userId, country, region), TIMEOUT_MS, label);
+                const { tasks, allTasks, inputs, stale } = await withTimeout(previewMarketplace(account.userId, country, region), TIMEOUT_MS, label);
                 const byType = {};
                 for (const t of tasks) (byType[t.errorType] = byType[t.errorType] || []).push(t);
                 console.log(`\n${label}: ${tasks.length} tasks  [${describeInputs(inputs)}]`);
@@ -123,7 +123,13 @@ async function main() {
                         console.log(`    - ${t.asin} ${t.productName}${money}\n      ${t.error}`);
                     }
                 }
-                report.push({ userId: account.userId, country, region, inputs: describeInputs(inputs), stale, tasks });
+                // Every task the account would get (old checks and new), by category:type.
+                const allByType = {};
+                for (const t of allTasks) {
+                    const key = `${t.errorCategory}:${String(t.errorType).replace(/^replenishment_needed_.*/, 'replenishment_needed')}`;
+                    allByType[key] = (allByType[key] || 0) + 1;
+                }
+                report.push({ userId: account.userId, country, region, inputs: describeInputs(inputs), stale, tasks, allByType, allCount: allTasks.length });
             } catch (error) {
                 console.log(`\n${label}: ERROR ${error.message}`);
                 report.push({ userId: account.userId, country, region, error: error.message });

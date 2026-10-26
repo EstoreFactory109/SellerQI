@@ -96,7 +96,11 @@ const ALL_TASK_TYPES = [
     ['inventory', 'fba_fee_increase'],
     ['account', 'invoice_defect_rate'],
     ['inventory', 'handling_time_long'],
-    ['inventory', 'new_seller_on_brand']
+    ['inventory', 'new_seller_on_brand'],
+    ['ranking', 'listing_errors'],
+    ['ranking', 'backend_keywords_title_overlap'],
+    ['ranking', 'backend_keywords_underused'],
+    ['ranking', 'titleresult_too_short']
 ];
 
 describe('normalizeErrorType', () => {
