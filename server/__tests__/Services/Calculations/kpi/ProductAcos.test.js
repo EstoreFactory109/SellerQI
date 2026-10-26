@@ -56,3 +56,34 @@ describe('detectProductAcos', () => {
         expect(map.size).toBe(0);
     });
 });
+
+describe('proposeBidCuts', () => {
+    const { proposeBidCuts } = require('../../../../Services/Calculations/kpi/AlignedDetectors.js');
+    const groups = [{ asin: 'A1', adGroupId: 'G1' }, { asin: 'A1', adGroupId: 'G2' }, { asin: 'B9', adGroupId: 'G2' }];
+    const snap = [
+        { keywordId: 'K1', keywordText: 'garlic press', adGroupId: 'G1', campaignId: 'C1', bid: 1.0, state: 'ENABLED' },
+        { keywordId: 'K2', keywordText: 'press', adGroupId: 'G2', campaignId: 'C1', bid: 0.8, state: 'enabled' },
+        { keywordId: 'K3', keywordText: 'no bid', adGroupId: 'G1', campaignId: 'C1', state: 'enabled' },
+        { keywordId: 'K4', keywordText: 'other product', adGroupId: 'G9', campaignId: 'C1', bid: 1, state: 'enabled' }
+    ];
+    const perf = (keywordId, adGroupId, cost, sales, clicks) => ({ keywordId, adGroupId, date: '2026-10-20', cost, attributedSales30d: sales, clicks });
+    const run = (rows, bePct = 20) => proposeBidCuts({ asin: 'A1', bePct, adGroupsByAsin: groups, keywordRows: rows, keywordSnapshot: snap, country: 'US', from: '2026-10-12' });
+
+    it('cuts toward break-even, at most 30%, and flags shared ad groups', () => {
+        // K1: ACoS 25% vs break-even 20% -> x0.8 = 0.80. K2: no sales -> max cut 30% -> 0.56.
+        const cuts = run([perf('K1', 'G1', 25, 100, 20), perf('K2', 'G2', 10, 0, 12)]);
+        expect(cuts.map(c => [c.keywordId, c.newBid, c.sharedAdGroup])).toEqual([['K1', 0.8, false], ['K2', 0.56, true]]);
+    });
+
+    it('skips keywords under 10 clicks, under break-even, without a bid, or in other products\' ad groups', () => {
+        expect(run([perf('K1', 'G1', 25, 100, 9)])).toEqual([]);
+        expect(run([perf('K1', 'G1', 10, 100, 20)])).toEqual([]);
+        expect(run([perf('K3', 'G1', 25, 0, 20)])).toEqual([]);
+        expect(run([perf('K4', 'G9', 25, 0, 20)])).toEqual([]);
+    });
+
+    it('never goes below the minimum bid', () => {
+        const low = snap.map(k => (k.keywordId === 'K1' ? { ...k, bid: 0.02 } : k));
+        expect(proposeBidCuts({ asin: 'A1', bePct: 20, adGroupsByAsin: groups, keywordRows: [perf('K1', 'G1', 25, 0, 20)], keywordSnapshot: low, country: 'US', from: '2026-10-12' })).toEqual([]);
+    });
+});

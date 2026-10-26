@@ -419,7 +419,8 @@ class AnalyseService {
             cogsData,
             ltsfData,
             fbaInventoryDetailData,
-            campaignSpendSales
+            campaignSpendSales,
+            adGroupsByAsin
         ] = await Promise.all([
             timedQuery('v2Data', () => V2_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
             timedQuery('v1Data', () => V1_Model.findOne({ User: userId, country, region }).sort({ createdAt: -1 }).lean()),
@@ -486,7 +487,13 @@ class AnalyseService {
                     .catch((error) => {
                         logger.warn('[Analyse] PPC campaign totals unavailable; high-ACOS tasks fall back to date-wise spend', { error: error.message });
                         return null;
-                    }))
+                    })),
+            // ASIN -> ad groups over the last 20 days, so an ACoS-above-break-even task can
+            // propose bid cuts on the keywords that spend on that product.
+            timedQuery('adGroupsByAsin', () =>
+                require('../../models/amazon-ads/ProductWiseSponsoredAdsItemModel.js')
+                    .adGroupsByAsinSince(userId, country, region, new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10))
+                    .catch(() => null))
         ]);
         
         const fetchEndTime = Date.now();
@@ -606,7 +613,8 @@ class AnalyseService {
             cogsData,
             ltsfData,
             fbaInventoryDetailData,
-            campaignSpendSales
+            campaignSpendSales,
+            adGroupsByAsin
         };
     }
 
@@ -960,6 +968,7 @@ class AnalyseService {
             GetOrderData: (allData.GetOrderData || { RevenueData: [] }).RevenueData,
             GetDateWisePPCspendData: (allData.GetDateWisePPCspendData || { dateWisePPCSpends: [] }).dateWisePPCSpends,
             campaignSpendSales: allData.campaignSpendSales || null,
+            AdGroupsByAsin: allData.adGroupsByAsin || null,
             // Per-unit COGS by ASIN ({} until the seller enters it): the loss-making rule needs it.
             cogsValues: (allData.cogsData && allData.cogsData.success && allData.cogsData.data?.cogsValues) || {},
             AdsGroupData: (allData.AdsGroupData || { adsGroupData: [] }).adsGroupData,

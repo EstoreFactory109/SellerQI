@@ -117,7 +117,8 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
     // Break-even needs fresh finance; without it the product ACoS check holds its tasks.
     const productAcos = financeFresh
         ? safely('product_acos_above_breakeven', { userId, country }, () => Aligned.detectProductAcos({
-            adsRows: data?.ProductWiseSponsoredAds, profitRows, cogsMap, country, productsByAsin: allByAsin, now
+            adsRows: data?.ProductWiseSponsoredAds, profitRows, cogsMap, country, productsByAsin: allByAsin, now,
+            adGroupsByAsin: data?.AdGroupsByAsin, keywordRows: data?.adsKeywordsPerformanceData, keywordSnapshot: data?.keywords
         }))
         : { tasks: [], covered: false };
     const alignedResult = {

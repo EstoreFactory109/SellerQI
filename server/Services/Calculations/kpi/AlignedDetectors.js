@@ -16,6 +16,15 @@ const PRODUCT_ACOS_MIN_SPEND = 30;
 const PRODUCT_ACOS_PRICE_MULTIPLE = 2;
 const PRODUCT_ACOS_MIN_CLICKS = 20;
 
+// Bid cuts proposed with the task (applied only after the seller approves them).
+// Internal guardrails: judge keywords with 10+ clicks, cut at most 30% per change,
+// never below Amazon's minimum Sponsored Products bid, at most 20 keywords per task.
+const BID_CUT_MIN_CLICKS = 10;
+const BID_CUT_MAX_SHARE = 0.30;
+const BID_CUT_MAX_KEYWORDS = 20;
+const MIN_BID_BY_COUNTRY = { JP: 2, IN: 1 };
+const minBidFor = (country) => MIN_BID_BY_COUNTRY[String(country || '').toUpperCase()] ?? 0.02;
+
 const round2 = (n) => Math.round(n * 100) / 100;
 const round1 = (n) => Math.round(n * 10) / 10;
 
@@ -42,6 +51,71 @@ function breakEvenAcosByAsin(profitRows = [], cogsMap = {}) {
 }
 
 /**
+ * Keyword bid cuts for one ASIN: keywords in the ad groups that advertise it, over
+ * the same 14 ads days, whose own ACoS is above the product's break-even (or that
+ * spent with no sales). New bid = current x break-even / keyword ACoS, cut at most
+ * 30%. Keywords without a stored bid use the ad group's default and are skipped.
+ *
+ * @returns {Array<{keywordId, keyword, campaignId, adGroupId, currentBid, newBid, acos, spend, clicks, sharedAdGroup}>}
+ */
+function proposeBidCuts({ asin, bePct, adGroupsByAsin = [], keywordRows = [], keywordSnapshot = [], country, from }) {
+    const groupsOfAsin = new Set();
+    const asinsPerGroup = new Map();
+    for (const r of adGroupsByAsin || []) {
+        if (!r?.adGroupId) continue;
+        const g = String(r.adGroupId);
+        if (!asinsPerGroup.has(g)) asinsPerGroup.set(g, new Set());
+        asinsPerGroup.get(g).add(r.asin);
+        if (r.asin === asin) groupsOfAsin.add(g);
+    }
+    if (groupsOfAsin.size === 0) return [];
+
+    const bidOf = new Map();
+    for (const k of keywordSnapshot || []) {
+        if (k?.keywordId && Number(k.bid) > 0 && String(k.state || '').toLowerCase() === 'enabled') {
+            bidOf.set(String(k.keywordId), { bid: Number(k.bid), text: k.keywordText, campaignId: k.campaignId, adGroupId: String(k.adGroupId) });
+        }
+    }
+
+    const perKeyword = new Map();
+    for (const row of keywordRows || []) {
+        const id = row?.keywordId ? String(row.keywordId) : '';
+        const day = rowDay(row);
+        if (!id || !day || day < from || !groupsOfAsin.has(String(row.adGroupId))) continue;
+        const k = perKeyword.get(id) || { spend: 0, sales: 0, clicks: 0, keyword: row.keyword };
+        k.spend += Number(row.cost) || 0;
+        k.sales += Number(row.attributedSales30d) || 0;
+        k.clicks += Number(row.clicks) || 0;
+        perKeyword.set(id, k);
+    }
+
+    const minBid = minBidFor(country);
+    const cuts = [];
+    for (const [keywordId, k] of perKeyword) {
+        const stored = bidOf.get(keywordId);
+        if (!stored || k.clicks < BID_CUT_MIN_CLICKS || k.spend <= 0) continue;
+        const acos = k.sales > 0 ? (k.spend / k.sales) * 100 : Infinity;
+        if (acos <= bePct) continue;
+        const factor = Number.isFinite(acos) && bePct > 0 ? bePct / acos : 0;
+        const newBid = round2(Math.max(minBid, stored.bid * Math.max(factor, 1 - BID_CUT_MAX_SHARE)));
+        if (newBid >= stored.bid - 0.005) continue;
+        cuts.push({
+            keywordId,
+            keyword: stored.text || k.keyword || keywordId,
+            campaignId: stored.campaignId ? String(stored.campaignId) : undefined,
+            adGroupId: stored.adGroupId,
+            currentBid: stored.bid,
+            newBid,
+            acos: Number.isFinite(acos) ? round1(acos) : null,
+            spend: round2(k.spend),
+            clicks: k.clicks,
+            sharedAdGroup: (asinsPerGroup.get(stored.adGroupId)?.size || 1) > 1
+        });
+    }
+    return cuts.sort((a, b) => b.spend - a.spend).slice(0, BID_CUT_MAX_KEYWORDS);
+}
+
+/**
  * Product ACoS above break-even over the last 14 ads days.
  *
  * @param {Object} params
@@ -50,7 +124,7 @@ function breakEvenAcosByAsin(profitRows = [], cogsMap = {}) {
  * @param {Object} params.cogsMap - per-unit COGS by ASIN
  * @param {Map} params.productsByAsin - catalogue rows (price, name)
  */
-function detectProductAcos({ adsRows, profitRows = [], cogsMap = {}, country, productsByAsin = new Map(), now }) {
+function detectProductAcos({ adsRows, profitRows = [], cogsMap = {}, country, productsByAsin = new Map(), now, adGroupsByAsin = null, keywordRows = [], keywordSnapshot = [] }) {
     const newestDay = newestRowDay(adsRows || []);
     if (!Array.isArray(adsRows) || adsRows.length === 0 || isAdsDataStale(newestDay, country, now)) {
         return { tasks: [], covered: false };
@@ -83,6 +157,9 @@ function detectProductAcos({ adsRows, profitRows = [], cogsMap = {}, country, pr
         if (acos <= be.pct) continue;
 
         const bePct = round1(Math.max(0, be.pct));
+        const bidChanges = Array.isArray(adGroupsByAsin)
+            ? proposeBidCuts({ asin, bePct: Math.max(0, be.pct), adGroupsByAsin, keywordRows, keywordSnapshot, country, from })
+            : [];
         const acosText = Number.isFinite(acos) ? `${round1(acos)}%` : 'all';
         const beText = be.fromCogs ? `your break-even of ${bePct}%` : `your target of ${bePct}% (add your cost of goods for a true break-even)`;
         tasks.push({
@@ -103,7 +180,10 @@ function detectProductAcos({ adsRows, profitRows = [], cogsMap = {}, country, pr
                 sales: round2(a.sales),
                 clicks: a.clicks,
                 days: PRODUCT_ACOS_DAYS,
-                newestAdsDay: newestDay
+                newestAdsDay: newestDay,
+                // Proposed keyword bid cuts; sent to Amazon only after the seller approves
+                // them on the Tasks page (TaskActionService 'lower_bids').
+                ...(bidChanges.length ? { bidChanges } : {})
             },
             status: PENDING
         });
@@ -116,6 +196,9 @@ module.exports = {
     PRODUCT_ACOS_MIN_SPEND,
     PRODUCT_ACOS_PRICE_MULTIPLE,
     PRODUCT_ACOS_MIN_CLICKS,
+    BID_CUT_MIN_CLICKS,
+    BID_CUT_MAX_SHARE,
     breakEvenAcosByAsin,
+    proposeBidCuts,
     detectProductAcos
 };

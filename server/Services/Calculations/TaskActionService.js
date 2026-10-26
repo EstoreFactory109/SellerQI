@@ -10,6 +10,8 @@
  * Supported (the same Amazon Ads calls the PPC page's buttons already make):
  *   search_term_zero_sales -> add the search term as a negative exact keyword
  *   wasted_spend_keyword   -> pause the keyword
+ *   product_acos_above_breakeven -> lower the bids of the keywords proposed on the
+ *     task (renderData.bidChanges); any keyword whose bid changed since is skipped
  *
  * Kill switch: TASK_ACTIONS_DISABLED=true stops every change (proposals are still
  * shown, approving returns an error).
@@ -32,10 +34,26 @@ const actionsDisabled = () => String(process.env.TASK_ACTIONS_DISABLED || '').to
  * Pure: the change a task proposes, or null. `payload` is what is sent to Amazon.
  * @param {Object} task - stored task (errorCategory, errorType, renderData)
  */
+const money = (n) => Number(n).toFixed(2);
+
 function proposedActionFor(task) {
     if (task?.errorCategory !== 'sponsoredAds') return null;
     const d = task.renderData || {};
     const campaign = d.campaignName ? ` in the campaign "${d.campaignName}"` : '';
+
+    if (task.errorType === 'product_acos_above_breakeven') {
+        const changes = (Array.isArray(d.bidChanges) ? d.bidChanges : []).filter(c => c?.keywordId && Number(c.newBid) > 0);
+        if (changes.length === 0) return null;
+        const lines = changes.map(c => `"${c.keyword}" ${money(c.currentBid)} → ${money(c.newBid)}`).join('; ');
+        const shared = changes.some(c => c.sharedAdGroup)
+            ? ' Some of these keywords are in ad groups that also advertise other products, so their bids change for those too.' : '';
+        return {
+            type: 'lower_bids',
+            label: `Lower ${changes.length} bid${changes.length === 1 ? '' : 's'}`,
+            summary: `Lower the bids on ${changes.length} keyword${changes.length === 1 ? '' : 's'} whose ads cost more than this product's break-even: ${lines}.${shared} Product targets and auto campaigns are not changed.`,
+            payload: { bids: changes.map(c => ({ keywordId: String(c.keywordId), bid: Number(c.newBid), expectedCurrentBid: Number(c.currentBid) })) }
+        };
+    }
 
     if (task.errorType === 'search_term_zero_sales') {
         const term = String(d.searchTerm || '').trim();
@@ -85,6 +103,20 @@ async function execute(action, { userId, country, region }) {
         const errors = v3Errors(result);
         if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected it: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: result });
         return result;
+    }
+    if (action.type === 'lower_bids') {
+        // Only keywords whose bid is still what the proposal saw: a bid the seller
+        // changed since is theirs to keep.
+        const { loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
+        const snapshot = await loadKeywordSnapshot(String(userId), country, region).catch(() => null);
+        const current = new Map((snapshot?.keywordData || []).map(k => [String(k.keywordId), Number(k.bid)]));
+        const bids = action.payload.bids.filter(b => Math.abs((current.get(b.keywordId) ?? NaN) - b.expectedCurrentBid) < 0.005);
+        if (bids.length === 0) throw new Error('These bids have changed since the suggestion was made, so nothing was sent. Refresh to see a new suggestion.');
+        const { updateKeywordBids } = require('../AmazonAds/Pause-ArchiveKeywords.js');
+        const result = await updateKeywordBids({ bids: bids.map(({ keywordId, bid }) => ({ keywordId, bid })), accessToken, profileId, region: adsRegion, clientId });
+        const errors = v3Errors(result);
+        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected ${errors.length} of ${bids.length}: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: result });
+        return { ...result, sent: bids.length, skippedChanged: action.payload.bids.length - bids.length };
     }
     if (action.type === 'pause_keyword') {
         const { pauseKeywords } = require('../AmazonAds/Pause-ArchiveKeywords.js');

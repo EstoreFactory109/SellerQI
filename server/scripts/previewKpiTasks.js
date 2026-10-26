@@ -72,9 +72,10 @@ async function previewMarketplace(userId, country, region) {
     };
     // Changes the seller could approve on the Tasks page (TaskActionService).
     const { proposedActionFor } = require('../Services/Calculations/TaskActionService.js');
-    const adTasks = (result?.previewTasks || []).filter(t => ['search_term_zero_sales', 'wasted_spend_keyword'].includes(t.errorType));
+    const adTasks = (result?.previewTasks || []).filter(t => ['search_term_zero_sales', 'wasted_spend_keyword', 'product_acos_above_breakeven'].includes(t.errorType));
     const proposals = adTasks.map(proposedActionFor).filter(Boolean);
-    const approvable = { adTasks: adTasks.length, proposals: proposals.length, sample: proposals[0]?.summary || null };
+    const bidSample = proposals.find(p => p.type === 'lower_bids');
+    const approvable = { adTasks: adTasks.length, proposals: proposals.length, bidCuts: proposals.filter(p => p.type === 'lower_bids').length, acosTasks: adTasks.filter(t => t.errorType === 'product_acos_above_breakeven').length, sample: (bidSample || proposals[0])?.summary || null };
     return { tasks: result?.kpiTasks || [], allTasks: result?.previewTasks || [], inputs, stale: result?.kpiStaleSources || [], faults: result?.kpiDataFaults || [], ready, approvable };
 }
 
@@ -127,7 +128,7 @@ async function main() {
                 for (const t of tasks) (byType[t.errorType] = byType[t.errorType] || []).push(t);
                 console.log(`\n${label}: ${tasks.length} tasks  [${describeInputs(inputs)}]`);
                 if (ready) console.log(`  Amazon Ready: ${ready.noP1toP3} of ${ready.candidates} judged (listing checks alone gave ${ready.listingChecks})`);
-                if (approvable?.adTasks) console.log(`  Approvable changes: ${approvable.proposals} of ${approvable.adTasks} ad tasks${approvable.sample ? ` — e.g. ${approvable.sample}` : ''}`);
+                if (approvable?.adTasks) console.log(`  Approvable changes: ${approvable.proposals} of ${approvable.adTasks} ad tasks (bid cuts on ${approvable.bidCuts} of ${approvable.acosTasks} ACoS tasks)${approvable.sample ? ` — e.g. ${approvable.sample}` : ''}`);
                 if (faults.length) console.log(`  DATA FAULT: ${faults.map(f => `${f.source}: ${f.fault}`).join('; ')}`);
                 if (stale.length) console.log(`  STALE: ${stale.map(s => `${s.source} ${s.ageHours}h > ${s.maxHours}h`).join(', ')}`);
                 for (const [type, list] of Object.entries(byType)) {

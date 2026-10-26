@@ -26,7 +26,13 @@ jest.mock('../../../Services/AmazonAds/addToNegetive.js', () => ({
     addToNegative: (...args) => mockAddToNegative(...args)
 }));
 const mockPause = jest.fn();
-jest.mock('../../../Services/AmazonAds/Pause-ArchiveKeywords.js', () => ({ pauseKeywords: (...args) => mockPause(...args) }));
+const mockBids = jest.fn();
+jest.mock('../../../Services/AmazonAds/Pause-ArchiveKeywords.js', () => ({
+    pauseKeywords: (...args) => mockPause(...args),
+    updateKeywordBids: (...args) => mockBids(...args)
+}));
+let mockSnapshot = null;
+jest.mock('../../../utils/ppcSnapshotLoader.js', () => ({ loadKeywordSnapshot: async () => mockSnapshot }));
 
 const S = require('../../../Services/Calculations/TaskActionService.js');
 
@@ -39,7 +45,7 @@ const run = (taskIds) => S.approveTaskActions({ userId: 'U', country: 'US', regi
 beforeEach(() => {
     mockTasks.length = 0; mockLogs.length = 0;
     mockTaskUpdates.length = 0;
-    mockAddToNegative.mockReset(); mockPause.mockReset();
+    mockAddToNegative.mockReset(); mockPause.mockReset(); mockBids.mockReset(); mockSnapshot = null;
     process.env.AMAZON_ADS_CLIENT_ID = 'cid';
     delete process.env.TASK_ACTIONS_DISABLED;
 });
@@ -110,5 +116,40 @@ describe('annotateProposedActions', () => {
         expect(out[0].proposedAction).toEqual({ type: 'add_negative_keyword', label: 'Add as negative keyword', summary: expect.any(String), done: false });
         expect(out[1].proposedAction.done).toBe(true);
         expect(out[2].proposedAction).toBeUndefined();
+    });
+});
+
+describe('lower_bids', () => {
+    const acosTask = { taskId: 'T5', errorCategory: 'sponsoredAds', errorType: 'product_acos_above_breakeven',
+        renderData: { bidChanges: [
+            { keywordId: 'K1', keyword: 'garlic press', currentBid: 1, newBid: 0.8, sharedAdGroup: false },
+            { keywordId: 'K2', keyword: 'press', currentBid: 0.8, newBid: 0.56, sharedAdGroup: true }
+        ] } };
+
+    it('proposes the listed cuts, naming shared ad groups', () => {
+        const a = S.proposedActionFor(acosTask);
+        expect(a).toMatchObject({ type: 'lower_bids', label: 'Lower 2 bids' });
+        expect(a.summary).toContain('"garlic press" 1.00 → 0.80; "press" 0.80 → 0.56');
+        expect(a.summary).toContain('also advertise other products');
+        expect(S.proposedActionFor({ ...acosTask, renderData: {} })).toBeNull();
+    });
+
+    it('sends only bids that have not changed since the proposal', async () => {
+        mockTasks.push(acosTask);
+        mockSnapshot = { keywordData: [{ keywordId: 'K1', bid: 1 }, { keywordId: 'K2', bid: 0.65 }] };
+        mockBids.mockResolvedValue({ keywords: { success: [{ index: 0 }], error: [] } });
+        const [r] = await run(['T5']);
+        expect(r.status).toBe('succeeded');
+        expect(mockBids).toHaveBeenCalledWith(expect.objectContaining({ bids: [{ keywordId: 'K1', bid: 0.8 }] }));
+        expect(mockLogs[0].response).toMatchObject({ sent: 1, skippedChanged: 1 });
+    });
+
+    it('sends nothing when every bid changed', async () => {
+        mockTasks.push(acosTask);
+        mockSnapshot = { keywordData: [{ keywordId: 'K1', bid: 2 }, { keywordId: 'K2', bid: 2 }] };
+        const [r] = await run(['T5']);
+        expect(r.status).toBe('failed');
+        expect(r.message).toContain('changed since the suggestion');
+        expect(mockBids).not.toHaveBeenCalled();
     });
 });

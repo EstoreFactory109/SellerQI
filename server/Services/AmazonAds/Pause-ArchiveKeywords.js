@@ -168,6 +168,23 @@ async function updateKeywordStateByIds(config, adType, keywordIds, state) {
   return response.data;
 }
 
+/**
+ * Set new bids on Sponsored Products keywords (v3 PUT /sp/keywords, the same call
+ * that changes their state). Used only after the seller approved the change
+ * (TaskActionService 'lower_bids').
+ * @param {Array<{keywordId: string, bid: number}>} bids
+ * @returns {Promise<object>} Amazon's v3 answer ({ keywords: { success: [], error: [] } })
+ */
+async function updateKeywordBids({ bids, accessToken, profileId, region, clientId }) {
+  const config = getConfig({ accessToken, profileId, region, clientId });
+  if (!config.accessToken || !config.clientId || !config.profileId) throw new Error("Missing Amazon Ads credentials.");
+  if (!Array.isArray(bids) || bids.length === 0) throw new Error("No bids to update.");
+  const url = `${BASE_URLS[config.region]}${ENDPOINTS.SP}`;
+  const payload = { keywords: bids.map((b) => ({ keywordId: String(b.keywordId), bid: Number(b.bid) })) };
+  const response = await axios.put(url, payload, { headers: buildHeadersForAdType("SP", config) });
+  return response.data;
+}
+
 // ─────────────────────────────────────────────
 // MAIN EXPORTED FUNCTION
 // ─────────────────────────────────────────────
@@ -281,7 +298,7 @@ async function archiveKeywords(options) {
 // ─────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────
-module.exports = { pauseKeywords, archiveKeywords, updateKeywordsState };
+module.exports = { pauseKeywords, archiveKeywords, updateKeywordsState, updateKeywordBids };
 
 
 // ─────────────────────────────────────────────
