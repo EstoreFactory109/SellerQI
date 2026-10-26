@@ -420,7 +420,51 @@ function detectDetailPageChanged({ listingChanges, productsByAsin = new Map(), n
     return { tasks, covered: true };
 }
 
+/**
+ * Returns processing fee risk. Spreadsheet: trailing 3-month return rate at 80%+ of
+ * the category threshold. Thresholds come from kpi/ReturnThresholds.js (maintained
+ * by hand); a product whose category is not listed gets no verdict.
+ */
+function detectReturnsFeeRisk({ returns, shipped90, fbaFees, country, productsByAsin = new Map(), now }) {
+    const T = require('./ReturnThresholds.js');
+    if (!T.hasThresholds(country) || !returns || returns.unreadable || !shipped90 || !fbaFees?.newest) {
+        return { tasks: [], covered: false };
+    }
+    const groupOf = new Map();
+    for (const row of Object.values(fbaFees.newest.bySku || {})) if (row?.asin && row.productGroup) groupOf.set(row.asin, row.productGroup);
+    const from = new Date(now.getTime() - R.RETURNS_FEE_DAYS * R.DAY_MS).toISOString().slice(0, 10);
+    const returned = new Map();
+    for (const l of returns.lines || []) {
+        if (!l?.asin || String(l.returnDate || '').slice(0, 10) < from) continue;
+        returned.set(l.asin, (returned.get(l.asin) || 0) + (Number(l.quantity) || 1));
+    }
+    const tasks = [];
+    for (const [asin, units] of returned) {
+        const shipped = Number(shipped90[asin]?.unitsSold) || 0;
+        const threshold = T.thresholdFor(groupOf.get(asin));
+        if (threshold === null || shipped < R.RETURNS_FEE_MIN_SHIPPED) continue;
+        const rate = (units / shipped) * 100;
+        if (rate < threshold * R.RETURNS_FEE_WARN_SHARE) continue;
+        const over = rate >= threshold;
+        const rate1 = Math.round(rate * 10) / 10;
+        tasks.push({
+            asin,
+            productName: nameOf(productsByAsin, asin),
+            errorCategory: 'inventory',
+            errorType: 'returns_fee_risk',
+            error: over
+                ? `Returns Fee: ${rate1}% of this product's units were returned in the last 3 months, over Amazon's ${threshold}% threshold for ${groupOf.get(asin)}, so Amazon charges a returns processing fee on each return.`
+                : `Returns Fee Warning: ${rate1}% of this product's units were returned in the last 3 months, close to Amazon's ${threshold}% threshold for ${groupOf.get(asin)}. Above it, Amazon charges a fee on each return.`,
+            solution: 'Read the return reasons and comments, fix what they point to (listing accuracy, sizing, quality or packaging), and check whether the product is worth keeping at this return rate.',
+            renderData: { returnRatePct: rate1, thresholdPct: threshold, returned: units, shipped, productGroup: groupOf.get(asin), over },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
 module.exports = {
+    detectReturnsFeeRisk,
     detectDetailPageChanged,
     detectReturnReasonSpike,
     detectListingErrors,

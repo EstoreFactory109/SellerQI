@@ -103,6 +103,12 @@ const DAMAGED_REASON_CODES = ['6', '7', 'E', 'H', 'K', 'U'];
 const REFUND_CLAIM_FROM_DAYS = 60;
 const REFUND_CLAIM_TO_DAYS = 120;
 
+// Spreadsheet "Returns processing fee risk": 3-month return rate at 80%+ of the
+// category threshold (kpi/ReturnThresholds.js). 25+ units shipped is internal.
+const RETURNS_FEE_DAYS = 90;
+const RETURNS_FEE_WARN_SHARE = 0.80;
+const RETURNS_FEE_MIN_SHIPPED = 25;
+
 // Spreadsheet "Detail page changed without us": changes in the last 7 days that no
 // recorded edit (Fix It, an approved task fix) explains. A recorded edit up to 3 days
 // before the change counts as ours (internal). A price that changed on 3+ of the last
@@ -218,6 +224,9 @@ module.exports = {
     TRAFFIC_MIX_MIN_ASINS,
     REFUND_CLAIM_FROM_DAYS,
     REFUND_CLAIM_TO_DAYS,
+    RETURNS_FEE_DAYS,
+    RETURNS_FEE_WARN_SHARE,
+    RETURNS_FEE_MIN_SHIPPED,
     DETAIL_CHANGE_DAYS,
     DETAIL_CHANGE_OURS_DAYS,
     REPRICER_PRICE_DAYS,

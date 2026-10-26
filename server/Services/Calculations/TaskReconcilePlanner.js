@@ -100,6 +100,7 @@ const SOURCE_BY_TYPE = {
     'inventory:lost_damaged_unreimbursed': 'kpi.lostDamaged',
     'inventory:return_reason_spike': 'kpi.returnReasons',
     'ranking:detail_page_changed': 'kpi.detailPageChanged',
+    'inventory:returns_fee_risk': 'kpi.returnsFee',
     'inventory:inbound_shortage': 'kpi.inboundShortage',
     'inventory:refund_not_returned': 'kpi.refundNotReturned',
     'conversion:high_traffic_low_conversion': 'kpi.trafficMix',

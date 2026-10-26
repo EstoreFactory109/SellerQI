@@ -104,6 +104,7 @@ const ALL_TASK_TYPES = [
     ['inventory', 'lost_damaged_unreimbursed'],
     ['inventory', 'return_reason_spike'],
     ['ranking', 'detail_page_changed'],
+    ['inventory', 'returns_fee_risk'],
     ['inventory', 'inbound_shortage'],
     ['inventory', 'refund_not_returned'],
     ['conversion', 'high_traffic_low_conversion'],

@@ -176,6 +176,7 @@ const EFFORT_MINUTES = {
     'inventory:lost_damaged_unreimbursed': 15, // file a claim
     'inventory:return_reason_spike': 30,    // read comments, fix listing or supplier
     'ranking:detail_page_changed': 10,      // check and restore, or mark as yours
+    'inventory:returns_fee_risk': 45,       // find and fix the return cause
     'inventory:inbound_shortage': 20,       // open a case with documents
     'inventory:refund_not_returned': 15,    // file a claim per order
     'conversion:high_traffic_low_conversion': 45, // listing work
@@ -309,6 +310,7 @@ const IMPACT_WEIGHT = {
     'inventory:return_reason_spike': 45,
     // Spreadsheet P2: someone else editing the listing can cost sales fast.
     'ranking:detail_page_changed': 70,
+    'inventory:returns_fee_risk': 45,
     'inventory:inbound_shortage': 72,
     'inventory:refund_not_returned': 72,
     // Spreadsheet P3 / P4.

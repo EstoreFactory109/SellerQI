@@ -526,7 +526,8 @@ async function loadFbaFeeSnapshots(userId, country, region) {
             bySku[item.sku] = {
                 asin: item.asin || '',
                 sizeTier: String(item['product-size-tier'] || '').trim(),
-                fee: feeKey ? toNum(item[feeKey]) : null
+                fee: feeKey ? toNum(item[feeKey]) : null,
+                productGroup: String(item['product-group'] || '').trim()
             };
         }
         return { at: iso(batch.at), bySku };
@@ -703,6 +704,12 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
             fbaFees,
             brandOffers,
             listingChanges: Array.isArray(changeEvents) ? { events: changeEvents, ourFixes: ourFixes || [] } : null,
+            // Units shipped over the last 90 days, only where the fee thresholds apply.
+            shipped90: require('./ReturnThresholds.js').hasThresholds(country)
+                ? await Promise.resolve()
+                    .then(() => getAsinFinanceForWindow(userId, country, region, new Date(now.getTime() - 91 * 24 * 60 * 60 * 1000), new Date(now.getTime() - 24 * 60 * 60 * 1000)))
+                    .catch(unavailable('Units shipped (90 days)'))
+                : null,
             returns: returnsDoc ? { fetchedAt: returnsDoc.createdAt, unreadable: !!returnsDoc.unreadable, lines: returnsDoc.lines || [] } : null,
             planning: buildPlanning(freshInventoryReportOrNull(allData?.inventoryPlanningData, 'Inventory planning (KPI)', { userId, country, region }, now)),
             invoice: buildInvoice(allData?.v2Data)

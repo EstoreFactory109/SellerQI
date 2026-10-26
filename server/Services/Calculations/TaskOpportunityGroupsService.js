@@ -188,6 +188,10 @@ const GROUP_COPY = {
         title: 'Products whose ads cost more than they earn',
         action: 'Lower bids or pause the targets above break-even ACoS'
     },
+    'inventory:returns_fee_risk': {
+        title: 'Products near or over Amazon\'s return-rate threshold',
+        action: 'Fix the return cause before the returns fee applies'
+    },
     'ranking:detail_page_changed': {
         title: 'Listings changed with no record of who changed them',
         action: 'Check each one, and restore it or mark the change as yours'

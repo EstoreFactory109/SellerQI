@@ -51,6 +51,7 @@ const KPI_SOURCES = Object.freeze({
     'inventory:new_seller_on_brand': 'kpi.newSellerOnBrand',
     'inventory:return_reason_spike': 'kpi.returnReasons',
     'ranking:detail_page_changed': 'kpi.detailPageChanged',
+    'inventory:returns_fee_risk': 'kpi.returnsFee',
     // Alignment of an existing check (runs without a wave flag)
     'ranking:listing_errors': 'kpi.listingErrors',
     'sponsoredAds:product_acos_above_breakeven': 'kpi.productAcos'
@@ -261,6 +262,7 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
             : { tasks: [], covered: false })), 'inventory:low_inventory_fee_risk');
         add(safely('fba_fee_increase', context, () => W3.detectFbaFeeIncrease({ fbaFees: inputs.fbaFees, salesByAsin: recentSales, productsByAsin, now })), 'inventory:fba_fee_increase');
         add(safely('handling_time_long', context, () => W3.detectLongHandlingTime({ products, productsByAsin })), 'inventory:handling_time_long');
+        add(safely('returns_fee_risk', context, () => W3.detectReturnsFeeRisk({ returns: inputs.returns, shipped90: inputs.shipped90, fbaFees: inputs.fbaFees, country, productsByAsin, now })), 'inventory:returns_fee_risk');
         add(safely('detail_page_changed', context, () => W3.detectDetailPageChanged({ listingChanges: inputs.listingChanges, productsByAsin, now })), 'ranking:detail_page_changed');
         add(safely('return_reason_spike', context, () => W3.detectReturnReasonSpike({ returns: inputs.returns, productsByAsin, now })), 'inventory:return_reason_spike');
         add(safely('new_seller_on_brand', context, () => W3.detectNewSellerOnBrand({ brandOffers: inputs.brandOffers, productsByAsin, now })), 'inventory:new_seller_on_brand');

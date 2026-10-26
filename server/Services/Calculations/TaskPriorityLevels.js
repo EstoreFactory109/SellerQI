@@ -52,6 +52,7 @@ const PRIORITY_LEVEL = {
     'inventory:low_inventory_fee_risk': 'P3',
     'inventory:fba_fee_increase': 'P3',
     'inventory:return_reason_spike': 'P3',
+    'inventory:returns_fee_risk': 'P3',
     'inventory:listing_warnings': 'P4',
     'inventory:handling_time_long': 'P4',
 
