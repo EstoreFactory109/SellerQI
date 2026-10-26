@@ -53,6 +53,9 @@ const PRIORITY_LEVEL = {
     'inventory:fba_fee_increase': 'P3',
     'inventory:return_reason_spike': 'P3',
     'inventory:returns_fee_risk': 'P3',
+    'conversion:priced_above_featured_offer': 'P3',
+    'inventory:subscribe_and_save': 'P4',
+    'inventory:inbound_placement_fees': 'P4',
     'inventory:listing_warnings': 'P4',
     'inventory:handling_time_long': 'P4',
 

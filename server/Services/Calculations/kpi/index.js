@@ -52,6 +52,9 @@ const KPI_SOURCES = Object.freeze({
     'inventory:return_reason_spike': 'kpi.returnReasons',
     'ranking:detail_page_changed': 'kpi.detailPageChanged',
     'inventory:returns_fee_risk': 'kpi.returnsFee',
+    'conversion:priced_above_featured_offer': 'kpi.featuredOfferPrice',
+    'inventory:subscribe_and_save': 'kpi.subscribeSave',
+    'inventory:inbound_placement_fees': 'kpi.placementFees',
     // Alignment of an existing check (runs without a wave flag)
     'ranking:listing_errors': 'kpi.listingErrors',
     'sponsoredAds:product_acos_above_breakeven': 'kpi.productAcos'
@@ -263,6 +266,9 @@ function runKpiDetectors(data, { salesByAsin = {}, financeFresh = false, profitR
             : { tasks: [], covered: false })), 'inventory:low_inventory_fee_risk');
         add(safely('fba_fee_increase', context, () => W3.detectFbaFeeIncrease({ fbaFees: inputs.fbaFees, salesByAsin: recentSales, productsByAsin, now })), 'inventory:fba_fee_increase');
         add(safely('handling_time_long', context, () => W3.detectLongHandlingTime({ products, productsByAsin })), 'inventory:handling_time_long');
+        add(safely('priced_above_featured_offer', context, () => W3.detectPricedAboveFeaturedOffer({ weeklySignals: inputs.weeklySignals, products, buyBoxRows: data.BuyBoxData?.asinBuyBoxData, productsByAsin })), 'conversion:priced_above_featured_offer');
+        add(safely('subscribe_and_save', context, () => W3.detectSubscribeSaveSuspended({ weeklySignals: inputs.weeklySignals, productsByAsin })), 'inventory:subscribe_and_save');
+        add(safely('inbound_placement_fees', context, () => W3.detectInboundPlacementFees({ weeklySignals: inputs.weeklySignals })), 'inventory:inbound_placement_fees');
         add(safely('returns_fee_risk', context, () => W3.detectReturnsFeeRisk({ returns: inputs.returns, shipped90: inputs.shipped90, fbaFees: inputs.fbaFees, country, productsByAsin, now })), 'inventory:returns_fee_risk');
         add(safely('detail_page_changed', context, () => W3.detectDetailPageChanged({ listingChanges: inputs.listingChanges, productsByAsin, now })), 'ranking:detail_page_changed');
         add(safely('return_reason_spike', context, () => W3.detectReturnReasonSpike({ returns: inputs.returns, productsByAsin, now })), 'inventory:return_reason_spike');

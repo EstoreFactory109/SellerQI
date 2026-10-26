@@ -696,6 +696,10 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
                 .select('asin sku attribute fixedAt').lean()
                 .catch(() => [])
         ]);
+        const weeklySignals = await require('../../../models/products/WeeklySignalsModel.js')
+            .findOne({ User: toObjectId(userId), country, region, createdAt: { $gte: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000) } })
+            .sort({ createdAt: -1 }).lean()
+            .catch(unavailable('Weekly signals'));
         const returnsDoc = await require('../../../models/inventory/CustomerReturnsModel.js')
             .findOne({ User: toObjectId(userId), country, region })
             .sort({ createdAt: -1 }).lean()
@@ -703,6 +707,7 @@ async function loadKpiInputs({ userId, country, region, waves, allData, now = ne
         Object.assign(inputs, {
             fbaFees,
             brandOffers,
+            weeklySignals: weeklySignals || null,
             listingChanges: Array.isArray(changeEvents) ? { events: changeEvents, ourFixes: ourFixes || [] } : null,
             // Units shipped over the last 90 days, only where the fee thresholds apply.
             shipped90: require('./ReturnThresholds.js').hasThresholds(country)

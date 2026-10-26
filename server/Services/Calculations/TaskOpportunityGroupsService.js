@@ -188,6 +188,18 @@ const GROUP_COPY = {
         title: 'Products whose ads cost more than they earn',
         action: 'Lower bids or pause the targets above break-even ACoS'
     },
+    'conversion:priced_above_featured_offer': {
+        title: 'Products priced above what wins the Buy Box',
+        action: 'Match Amazon\'s expected price where the margin allows'
+    },
+    'inventory:subscribe_and_save': {
+        title: 'Subscribe & Save offers Amazon has suspended',
+        action: 'Fix the stock or price issue to restart deliveries'
+    },
+    'inventory:inbound_placement_fees': {
+        title: 'Inbound placement fees paid this month',
+        action: 'Use Amazon\'s optimised split on future shipments'
+    },
     'inventory:returns_fee_risk': {
         title: 'Products near or over Amazon\'s return-rate threshold',
         action: 'Fix the return cause before the returns fee applies'

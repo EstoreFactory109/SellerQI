@@ -463,7 +463,97 @@ function detectReturnsFeeRisk({ returns, shipped90, fbaFees, country, productsBy
     return { tasks, covered: true };
 }
 
+const usd = (n, cur) => `${cur && cur !== 'USD' ? cur + ' ' : '$'}${Number(n).toFixed(2)}`;
+
+/**
+ * Priced above featured offer expected price. Spreadsheet: own price above the price
+ * Amazon expects to win the featured offer, and the product's Buy Box share under 80%.
+ * Amazon gives the expected price only when there is a competing offer (VALID_FOEP).
+ */
+function detectPricedAboveFeaturedOffer({ weeklySignals, products = [], buyBoxRows = [], productsByAsin = new Map() }) {
+    const rows = weeklySignals?.featuredOffers;
+    if (!Array.isArray(rows)) return { tasks: [], covered: false };
+    const priceBySku = new Map(products.filter(p => p?.sku).map(p => [String(p.sku), Number(p.price) || 0]));
+    const shareByAsin = new Map();
+    for (const r of buyBoxRows || []) {
+        const asin = r?.childAsin || r?.asin;
+        if (asin && Number.isFinite(Number(r.buyBoxPercentage))) shareByAsin.set(asin, Number(r.buyBoxPercentage));
+    }
+    const byAsin = new Map();
+    for (const row of rows) {
+        if (row?.status !== 'VALID_FOEP' || !(Number(row.expectedPrice) > 0) || !row.asin) continue;
+        const ours = priceBySku.get(String(row.sku)) || 0;
+        const share = shareByAsin.get(row.asin);
+        if (!(ours > Number(row.expectedPrice) + 0.005) || !(share < 80)) continue;
+        if (!byAsin.has(row.asin)) byAsin.set(row.asin, { ...row, ours, share });
+    }
+    const tasks = [...byAsin.values()].map(r => ({
+        asin: r.asin,
+        productName: nameOf(productsByAsin, r.asin),
+        errorCategory: 'conversion',
+        errorType: 'priced_above_featured_offer',
+        error: `Pricing | Above Featured Offer Price: Your price (${usd(r.ours, r.currency)}) is above the level Amazon expects to win the Buy Box (${usd(r.expectedPrice, r.currency)}), and you hold the Buy Box on ${Math.round(r.share)}% of visits.`,
+        solution: `Consider matching ${usd(r.expectedPrice, r.currency)} if your margin allows.`,
+        renderData: { sku: r.sku, ourPrice: r.ours, expectedPrice: r.expectedPrice, buyBoxPct: r.share },
+        status: PENDING
+    }));
+    return { tasks, covered: true };
+}
+
+/**
+ * Subscribe & Save. Spreadsheet: eligible consumable ASIN not enrolled. Amazon's
+ * Replenishment API lists only offers already in the program, so "eligible but not
+ * enrolled" cannot be read; what it does show is an offer Amazon has suspended, which
+ * stops serving its subscribers. That is the task here.
+ */
+function detectSubscribeSaveSuspended({ weeklySignals, productsByAsin = new Map() }) {
+    const offers = weeklySignals?.subscribeSave;
+    if (!Array.isArray(offers)) return { tasks: [], covered: false };
+    const seen = new Set();
+    const tasks = [];
+    for (const o of offers) {
+        if (o?.eligibility !== 'SUSPENDED' || !o.asin || seen.has(o.asin)) continue;
+        seen.add(o.asin);
+        tasks.push({
+            asin: o.asin,
+            productName: nameOf(productsByAsin, o.asin),
+            errorCategory: 'inventory',
+            errorType: 'subscribe_and_save',
+            error: `Subscribe & Save | Offer Suspended: Amazon has suspended this product's Subscribe & Save offer${o.subscriptions ? `, which has ${o.subscriptions} subscriber${o.subscriptions === 1 ? '' : 's'}` : ''}, so subscribers cannot get their deliveries.`,
+            solution: 'Check the reason in Seller Central (Programs > Subscribe & Save) — usually stock or price — and fix it to get the offer running again.',
+            renderData: { sku: o.sku, subscriptions: o.subscriptions },
+            status: PENDING
+        });
+    }
+    return { tasks, covered: true };
+}
+
+/** Inbound placement fees. Spreadsheet: placement fees in the last 30 days over $100. */
+function detectInboundPlacementFees({ weeklySignals }) {
+    const fees = weeklySignals?.placementFees;
+    if (!fees) return { tasks: [], covered: false };
+    if (!(Number(fees.total) > 100)) return { tasks: [], covered: true };
+    return {
+        tasks: [{
+            asin: 'ACCOUNT',
+            productName: 'Inbound shipments',
+            errorCategory: 'inventory',
+            errorType: 'inbound_placement_fees',
+            error: `Inbound | Placement Fees: You paid ${usd(fees.total, fees.currency)} in inbound placement fees on ${fees.plans?.length || 0} shipment plan${fees.plans?.length === 1 ? '' : 's'} in the last ${fees.windowDays || 30} days.`,
+            solution: "Choosing Amazon's optimised split on future shipments removes this fee.",
+            amount: Math.round(Number(fees.total) * 100) / 100,
+            amountIsEstimated: false,
+            renderData: { total: fees.total, plans: (fees.plans || []).length },
+            status: PENDING
+        }],
+        covered: true
+    };
+}
+
 module.exports = {
+    detectPricedAboveFeaturedOffer,
+    detectSubscribeSaveSuspended,
+    detectInboundPlacementFees,
     detectReturnsFeeRisk,
     detectDetailPageChanged,
     detectReturnReasonSpike,

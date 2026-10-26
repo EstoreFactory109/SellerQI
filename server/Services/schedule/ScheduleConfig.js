@@ -95,6 +95,16 @@ const SUNDAY_FUNCTIONS = {
         apiDataKey: 'customerReturnsData',
         isDefaultExport: true
     },
+    // Weekly reads for "priced above featured offer", Subscribe & Save and inbound
+    // placement fees (tasks-logics.xlsx). Batch 3, after the daily Sales & Traffic read.
+    'weeklySignalsData': {
+        service: require('../Sp_API/WeeklySignalsSync.js'),
+        functionName: null, // Default export, use service directly
+        description: 'Weekly pricing, Subscribe & Save and placement fee reads',
+        requiresAccessToken: true,
+        apiDataKey: 'weeklySignalsData',
+        isDefaultExport: true
+    },
     'brandOffersData': {
         service: require('../Sp_API/BrandOffersSync.js'),
         functionName: null, // Default export, use service directly

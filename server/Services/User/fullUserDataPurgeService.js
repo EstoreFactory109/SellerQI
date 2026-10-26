@@ -99,6 +99,7 @@ const TaskActionLog = require('../../models/MCP/TaskActionLogModel.js');
 const ListingChangeEvent = require('../../models/products/ListingChangeEventModel.js');
 const RefundOrder = require('../../models/finance/RefundOrderModel.js');
 const AdsTargetSnapshot = require('../../models/amazon-ads/AdsTargetSnapshotModel.js');
+const WeeklySignals = require('../../models/products/WeeklySignalsModel.js');
 const RemovalReceipt = require('../../models/inventory/RemovalReceiptModel.js');
 const BrandOfferSnapshot = require('../../models/products/BrandOfferSnapshotModel.js');
 const AuthorizedReseller = require('../../models/products/AuthorizedResellerModel.js');
@@ -194,6 +195,7 @@ const collectionsWithUser = [
     { model: ListingChangeEvent, key: 'User' },
     { model: RefundOrder, key: 'User' },
     { model: AdsTargetSnapshot, key: 'userId' },
+    { model: WeeklySignals, key: 'User' },
     { model: RemovalReceipt, key: 'User' },
     { model: BrandOfferSnapshot, key: 'User' },
     { model: AuthorizedReseller, key: 'User' },
