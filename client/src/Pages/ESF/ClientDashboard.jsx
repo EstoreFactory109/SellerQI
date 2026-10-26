@@ -245,7 +245,12 @@ const ClientDashboard = () => {
     const activity = [...completed]
         .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
         .slice(0, 6)
-        .map((t) => ({ text: `${t.name} - completed`, time: relativeTime(t.updatedAt) }));
+        .map((t) => {
+            // What was delivered, when the team attached files or links to it.
+            const delivered = (t.deliverables || []).length;
+            const suffix = delivered ? ` · ${delivered} file${delivered === 1 ? '' : 's'} delivered` : '';
+            return { text: `${t.name} - completed${suffix}`, time: relativeTime(t.updatedAt) };
+        });
 
     // The biggest thing nobody has picked up yet, straight from the audit. Already
     // filtered against open Zoho tasks at sync time, so it is never something the

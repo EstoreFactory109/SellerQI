@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PALETTE, dividerStyle } from '../../../Components/ESF/estoreFactoryTheme.js';
 import axiosInstance from '../../../config/axios.config.js';
+import { useDeliverableActions, DeliverableList, DeliverablesBar, DeliverableCount, dayLabelOf } from '../../../Components/ESF/TaskDeliverables.jsx';
 import AttachmentPicker from '../../../Components/ESF/AttachmentPicker.jsx';
 
 /**
@@ -405,17 +406,142 @@ const parseDayWiseSummary = (text) => {
 };
 
 /**
+ * A task's detail: the day-by-day summary with each day's delivered files under it, then the
+ * remaining files and "Download all". Shared by In progress rows and Completed rows.
+ */
+const TaskDetail = ({ task, canManage, onDeliverableChange }) => {
+    const dayWise = task.summary ? parseDayWiseSummary(task.summary) : null;
+    const deliverables = task.deliverables || [];
+    const actions = useDeliverableActions({ onChanged: (key, visibility) => onDeliverableChange?.(task.id, key, visibility) });
+
+    // Shown files sit under the day they were delivered; anything else (no matching day,
+    // or hidden from the client — staff only) goes in the list below the timeline.
+    const dayLabels = new Set((dayWise?.days || []).map((d) => d.label));
+    const placed = (item) => item.shown !== false && dayLabels.has(dayLabelOf(item.addedAt));
+    const forDay = (label) => deliverables.filter((item) => placed(item) && dayLabelOf(item.addedAt) === label);
+    const rest = deliverables.filter((item) => !placed(item));
+
+    return (
+        <div className="flex flex-col gap-3">
+            {dayWise ? (
+                <div className="max-w-[80ch]">
+                    {dayWise.days.map((day, i) => {
+                        const isLatest = i === dayWise.days.length - 1;
+                        return (
+                            <div key={i} className="flex gap-3">
+                                <div className="flex-none w-[9px] flex flex-col items-center">
+                                    <span
+                                        className="w-[9px] h-[9px] rounded-full flex-none mt-[5px]"
+                                        style={{
+                                            background: isLatest ? PALETTE.accent : PALETTE.borderHover,
+                                            boxShadow: isLatest ? '0 0 0 3px rgba(59,130,246,.18)' : 'none',
+                                        }}
+                                    />
+                                    {!isLatest && <span className="flex-1 w-px mt-1" style={{ background: PALETTE.dividerFaint, minHeight: 10 }} />}
+                                </div>
+                                <div className="flex-1 min-w-0 pb-3">
+                                    <div className="flex items-baseline gap-2 flex-wrap">
+                                        <span className="text-[11px] font-semibold tracking-wide" style={{ color: isLatest ? PALETTE.accentLight : PALETTE.textMuted }}>
+                                            {day.label}
+                                        </span>
+                                        {isLatest && (
+                                            <span className="text-[9.5px] font-semibold uppercase tracking-wider rounded px-[6px] py-[1px]" style={{ background: 'rgba(59,130,246,.14)', color: PALETTE.accentLight }}>
+                                                Latest
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="m-0 mt-[3px] text-[13px] leading-[1.6]" style={{ color: isLatest ? PALETTE.textBody : '#9099A3' }}>
+                                        {day.text}
+                                    </p>
+                                    <DeliverableList items={forDay(day.label)} canManage={canManage} actions={actions} compact />
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {dayWise.note && (
+                        <p className="m-0 pl-5 pt-1 text-[11.5px] italic" style={{ color: PALETTE.textFaint }}>{dayWise.note}</p>
+                    )}
+                </div>
+            ) : task.summary ? (
+                <p className="m-0 text-[13px] leading-[1.65] max-w-[80ch] whitespace-pre-line" style={{ color: '#B7BDC6' }}>
+                    {task.summary}
+                </p>
+            ) : deliverables.length === 0 ? (
+                <p className="m-0 text-[12.5px]" style={{ color: PALETTE.textMuted }}>No updates on this task yet.</p>
+            ) : null}
+
+            {deliverables.length > 0 && (
+                <div className="flex flex-col gap-2.5 rounded-lg p-3" style={{ background: 'rgba(255,255,255,.02)', border: `1px solid ${PALETTE.dividerFaint}` }}>
+                    <DeliverablesBar task={task} items={deliverables} actions={actions} />
+                    <DeliverableList items={rest} canManage={canManage} actions={actions} />
+                    {rest.length === 0 && (
+                        <span className="text-xs" style={{ color: PALETTE.textMuted }}>Each file is shown under the day it was delivered.</span>
+                    )}
+                </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: PALETTE.textMuted }}>
+                {task.updateCount > 0 && (
+                    <span>
+                        Summarised from {task.updateCount} update{task.updateCount === 1 ? '' : 's'}
+                        {task.lastUpdateAt ? `, latest ${shortDate(task.lastUpdateAt)}` : ''}
+                    </span>
+                )}
+                {task.endDate && <span>Due {shortDate(task.endDate)}</span>}
+                {task.hasAttachments && deliverables.length === 0 && <span>Has attachments in Zoho</span>}
+            </div>
+            {actions.overlay}
+        </div>
+    );
+};
+
+/** A completed task: one line, expanding to its summary and what was delivered. */
+const CompletedRow = ({ task, isFirst, canManage, onDeliverableChange }) => {
+    const [open, setOpen] = useState(false);
+    const deliverables = task.deliverables || [];
+    const expandable = Boolean(task.summary) || deliverables.length > 0;
+    return (
+        <div style={isFirst ? undefined : dividerStyle('rgba(255,255,255,.04)')}>
+            <div
+                role={expandable ? 'button' : undefined}
+                tabIndex={expandable ? 0 : undefined}
+                onClick={() => expandable && setOpen((v) => !v)}
+                onKeyDown={(e) => { if (expandable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen((v) => !v); } }}
+                className={`flex items-center gap-4 py-[14px] ${expandable ? 'cursor-pointer' : ''}`}
+            >
+                <span className="flex-1 flex items-center gap-2 min-w-0">
+                    <span className="text-[13px] min-w-0 truncate" style={{ color: PALETTE.textTertiary }} title={task.name}>{task.name}</span>
+                    <DeliverableCount items={deliverables} />
+                </span>
+                {task.team && (
+                    <span className="flex-none text-xs" style={{ color: PALETTE.textDim }}>{task.team}</span>
+                )}
+                <span className="flex-none text-xs" style={{ color: PALETTE.textMuted }}>Completed {shortDate(task.updatedAt) || '-'}</span>
+                <span className="flex-none w-3 text-[10px] text-right" style={{ color: PALETTE.textFaint, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>
+                    {expandable ? '▾' : ''}
+                </span>
+            </div>
+            {open && (
+                <div className="pb-4">
+                    <TaskDetail task={task} canManage={canManage} onDeliverableChange={onDeliverableChange} />
+                </div>
+            )}
+        </div>
+    );
+};
+
+/**
  * One task row, expanding to the AI progress summary of its Zoho discussion.
  *
  * The raw thread is never sent to the browser — it is the agency's internal
  * chatter. The server ships a summary generated at sync time plus a count, so
  * the client sees what happened without reading how it was discussed.
  */
-const TaskRow = ({ task, isFirst }) => {
+const TaskRow = ({ task, isFirst, canManage, onDeliverableChange }) => {
     const [open, setOpen] = useState(false);
     const priority = badgeFor(PRIORITY_STYLE, task.priority);
-    const hasDetail = Boolean(task.summary) || task.updateCount > 0;
-    const dayWise = task.summary ? parseDayWiseSummary(task.summary) : null;
+    const deliverables = task.deliverables || [];
+    const hasDetail = Boolean(task.summary) || task.updateCount > 0 || deliverables.length > 0;
 
     return (
         <>
@@ -431,7 +557,10 @@ const TaskRow = ({ task, isFirst }) => {
                     The task list ("Meta", "TikTok", "Google") is the short, real,
                     meaningful identifier in this portal. */}
                 <span className="text-xs truncate" style={{ color: PALETTE.textMuted }}>{task.tasklist || '-'}</span>
-                <span className="text-[13.5px] min-w-0 truncate" style={{ color: PALETTE.textBody }} title={task.name}>{task.name}</span>
+                <span className="flex items-center gap-2 min-w-0">
+                    <span className="text-[13.5px] min-w-0 truncate" style={{ color: PALETTE.textBody }} title={task.name}>{task.name}</span>
+                    <DeliverableCount items={deliverables} />
+                </span>
                 <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: priority.bg, color: priority.color }}>
                     {task.priority || 'Normal'}
                 </span>
@@ -453,63 +582,8 @@ const TaskRow = ({ task, isFirst }) => {
             </div>
 
             {open && (
-                <div className="flex flex-col gap-3 pb-5" style={dividerStyle()}>
-                    {dayWise ? (
-                        <div className="max-w-[80ch]">
-                            {dayWise.days.map((day, i) => {
-                                const isLatest = i === dayWise.days.length - 1;
-                                return (
-                                    <div key={i} className="flex gap-3">
-                                        <div className="flex-none w-[9px] flex flex-col items-center">
-                                            <span
-                                                className="w-[9px] h-[9px] rounded-full flex-none mt-[5px]"
-                                                style={{
-                                                    background: isLatest ? PALETTE.accent : PALETTE.borderHover,
-                                                    boxShadow: isLatest ? '0 0 0 3px rgba(59,130,246,.18)' : 'none',
-                                                }}
-                                            />
-                                            {!isLatest && <span className="flex-1 w-px mt-1" style={{ background: PALETTE.dividerFaint, minHeight: 10 }} />}
-                                        </div>
-                                        <div className="flex-1 min-w-0 pb-3">
-                                            <div className="flex items-baseline gap-2 flex-wrap">
-                                                <span className="text-[11px] font-semibold tracking-wide" style={{ color: isLatest ? PALETTE.accentLight : PALETTE.textMuted }}>
-                                                    {day.label}
-                                                </span>
-                                                {isLatest && (
-                                                    <span className="text-[9.5px] font-semibold uppercase tracking-wider rounded px-[6px] py-[1px]" style={{ background: 'rgba(59,130,246,.14)', color: PALETTE.accentLight }}>
-                                                        Latest
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <p className="m-0 mt-[3px] text-[13px] leading-[1.6]" style={{ color: isLatest ? PALETTE.textBody : '#9099A3' }}>
-                                                {day.text}
-                                            </p>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                            {dayWise.note && (
-                                <p className="m-0 pl-5 pt-1 text-[11.5px] italic" style={{ color: PALETTE.textFaint }}>{dayWise.note}</p>
-                            )}
-                        </div>
-                    ) : task.summary ? (
-                        <p className="m-0 text-[13px] leading-[1.65] max-w-[80ch] whitespace-pre-line" style={{ color: '#B7BDC6' }}>
-                            {task.summary}
-                        </p>
-                    ) : (
-                        <p className="m-0 text-[12.5px]" style={{ color: PALETTE.textMuted }}>No updates on this task yet.</p>
-                    )}
-
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" style={{ color: PALETTE.textMuted }}>
-                        {task.updateCount > 0 && (
-                            <span>
-                                Summarised from {task.updateCount} update{task.updateCount === 1 ? '' : 's'}
-                                {task.lastUpdateAt ? `, latest ${shortDate(task.lastUpdateAt)}` : ''}
-                            </span>
-                        )}
-                        {task.endDate && <span>Due {shortDate(task.endDate)}</span>}
-                        {task.hasAttachments && <span>Has attachments in Zoho</span>}
-                    </div>
+                <div className="pb-5" style={dividerStyle()}>
+                    <TaskDetail task={task} canManage={canManage} onDeliverableChange={onDeliverableChange} />
                 </div>
             )}
         </>
@@ -586,6 +660,24 @@ const Status = () => {
     }, []);
 
     const waitingOnYou = board?.waitingOnYou || [];
+    // Staff (logged in as the client) can show / hide a file the AI judged; reflect it at once.
+    const canManage = Boolean(board?.canManageDeliverables);
+    const updateDeliverable = useCallback((taskId, key, visibility) => {
+        const apply = (tasks = []) => tasks.map((t) => (t.id !== taskId ? t : {
+            ...t,
+            deliverables: (t.deliverables || []).map((d) => (d.key !== key ? d : {
+                ...d,
+                override: visibility === 'auto' ? null : visibility,
+                shown: visibility === 'auto' ? d.aiDecision === 'yes' : visibility === 'show',
+            })),
+        }));
+        setBoard((current) => (current ? {
+            ...current,
+            inProgress: apply(current.inProgress),
+            completed: apply(current.completed),
+        } : current));
+    }, []);
+
     const inProgress = board?.inProgress || [];
     const comingUp = board?.comingUp || [];
     const completed = board?.completed || [];
@@ -846,7 +938,7 @@ const Status = () => {
                                     <SectionEmpty>Nothing is in progress right now.</SectionEmpty>
                                 ) : (
                                     inProgress.map((task, i) => (
-                                        <TaskRow key={task.id} task={task} isFirst={i === 0} />
+                                        <TaskRow key={task.id} task={task} isFirst={i === 0} canManage={canManage} onDeliverableChange={updateDeliverable} />
                                     ))
                                 )}
                             </div>
@@ -928,13 +1020,7 @@ const Status = () => {
                             <SectionEmpty>Nothing was completed in the last 30 days.</SectionEmpty>
                         ) : (
                             completed.map((c, i) => (
-                                <div key={c.id} className="flex items-center gap-4 py-[14px]" style={i > 0 ? dividerStyle('rgba(255,255,255,.04)') : undefined}>
-                                    <span className="flex-1 text-[13px] min-w-0 truncate" style={{ color: PALETTE.textTertiary }} title={c.name}>{c.name}</span>
-                                    {c.team && (
-                                        <span className="flex-none text-xs" style={{ color: PALETTE.textDim }}>{c.team}</span>
-                                    )}
-                                    <span className="flex-none text-xs" style={{ color: PALETTE.textMuted }}>Completed {shortDate(c.updatedAt) || '-'}</span>
-                                </div>
+                                <CompletedRow key={c.id} task={c} isFirst={i === 0} canManage={canManage} onDeliverableChange={updateDeliverable} />
                             ))
                         )}
                     </div>
