@@ -10,3 +10,10 @@
  */
 export const PER_PAGE_MARKETPLACE = import.meta.env.VITE_PER_PAGE_MARKETPLACE === 'true';
 export const ALL_MARKETPLACES_DASHBOARD = PER_PAGE_MARKETPLACE && import.meta.env.VITE_ALL_MARKETPLACES_DASHBOARD === 'true';
+
+/**
+ * VITE_FIX_IT_PACKAGES — the Tasks page's "Fix it now" / "Have us fix these" buttons and the
+ * price line that sells them. Off until the Fix it packages are ready to offer; the rest of the
+ * Tasks page (what the open tasks cost, the account risks) shows either way.
+ */
+export const FIX_IT_PACKAGES = import.meta.env.VITE_FIX_IT_PACKAGES === 'true';

@@ -28,6 +28,7 @@ import {
 import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 import FixItPackagesModal from '../../Components/Tasks/FixItPackagesModal.jsx';
 import FixItUrgencyCard from '../../Components/Tasks/FixItUrgencyCard.jsx';
+import { FIX_IT_PACKAGES } from '../../utils/featureFlags.js';
 import RemovalReceiptModal from '../../Components/Tasks/RemovalReceiptModal.jsx';
 import ApproveChangeModal from '../../Components/Tasks/ApproveChangeModal.jsx';
 import BulkApproveModal from '../../Components/Tasks/BulkApproveModal.jsx';
@@ -767,7 +768,7 @@ export default function Tasks() {
         openTasks={openTasks}
         totalTasks={transformedTasks.length}
         currency={currency}
-        onFix={openFixIt}
+        onFix={FIX_IT_PACKAGES ? openFixIt : undefined}
       />
 
       {/* Renew date tip - always visible (same style as Your Products page) */}
@@ -938,7 +939,7 @@ export default function Tasks() {
                   <span className="text-[13px] flex-shrink-0" style={{ color: COLORS.textSecondary }}>{pendingInGroup} pending</span>
                   <ChevronRight size={16} style={{ color: COLORS.textMuted, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
                 </button>
-                {groupId === BUCKET.HIGH_IMPACT && pendingInGroup > 0 && (
+                {FIX_IT_PACKAGES && groupId === BUCKET.HIGH_IMPACT && pendingInGroup > 0 && (
                   <button
                     type="button"
                     onClick={() => openFixIt('bucket')}

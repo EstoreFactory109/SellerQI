@@ -14,6 +14,14 @@ import Tasks from '../../Pages/Tools/Tasks.jsx';
 
 // The component dispatches a fetch thunk on mount; stub the network layer so the
 // pre-seeded store state is what renders.
+// The Fix it packages are off by default (VITE_FIX_IT_PACKAGES); most tests here cover them, so
+// they run with the switch on. The "switched off" block below flips it.
+const flags = vi.hoisted(() => ({ FIX_IT_PACKAGES: true }));
+vi.mock('../../utils/featureFlags.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  get FIX_IT_PACKAGES() { return flags.FIX_IT_PACKAGES; },
+}));
+
 vi.mock('../../redux/slices/TasksSlice.js', async () => {
   const actual = await vi.importActual('../../redux/slices/TasksSlice.js');
   return {
@@ -458,5 +466,19 @@ describe('Tasks page - urgency card', () => {
       source: 'hero', open_tasks: 9, monthly_recoverable: 1007.03,
     });
     delete window.gtag;
+  });
+});
+
+describe('Tasks page - Fix it switched off (the default)', () => {
+  beforeEach(() => { flags.FIX_IT_PACKAGES = false; });
+  afterEach(() => { flags.FIX_IT_PACKAGES = true; });
+
+  it('shows no Fix it buttons and no price line, but keeps what the tasks cost', () => {
+    renderTasks();
+    expect(screen.queryByRole('button', { name: /Fix it now/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Have us fix these' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('price-anchor')).not.toBeInTheDocument();
+    expect(screen.getByTestId('urgency-headline')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

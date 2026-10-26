@@ -55,7 +55,8 @@ function LiveLossCounter({ monthly, currency }) {
  * @param {Array} props.openTasks
  * @param {number} props.totalTasks - every task for the marketplace, any status
  * @param {string} props.currency - marketplace currency symbol
- * @param {(source: string) => void} props.onFix
+ * @param {(source: string) => void} [props.onFix] Without it there is no "Fix it now" button
+ *   and no price line — the Fix it packages are switched off (VITE_FIX_IT_PACKAGES).
  */
 const FixItUrgencyCard = ({ urgency, openTasks = [], totalTasks = 0, currency = '$', onFix }) => {
   const hasMoney = urgency.monthlyRecoverable > 0;
@@ -223,6 +224,7 @@ const FixItUrgencyCard = ({ urgency, openTasks = [], totalTasks = 0, currency = 
         className="px-5 sm:px-6 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-t"
         style={{ borderColor: 'rgba(255,255,255,.06)', background: 'rgba(0,0,0,.18)' }}
       >
+        {onFix ? (
         <div className="text-[13px]" style={{ color: COLORS.textSecondary }} data-testid="price-anchor">
           {usd && trial.monthlyValue > 0 ? (
             <>
@@ -235,11 +237,13 @@ const FixItUrgencyCard = ({ urgency, openTasks = [], totalTasks = 0, currency = 
             <>Hand these to our team and stop the leak. Plans start at <strong style={{ color: COLORS.textPrimary }}>${TRIAL_PRICE}</strong> for {TRIAL_TASKS} tasks.</>
           )}
         </div>
+        ) : <span />}
         <div className="flex items-center gap-4 flex-shrink-0">
           <TotalTasks totalTasks={totalTasks} />
+          {onFix && (
           <button
             type="button"
-            onClick={() => onFix?.(hasRisk ? 'card_risk' : 'hero')}
+            onClick={() => onFix(hasRisk ? 'card_risk' : 'hero')}
             className="group flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-[15px] font-bold transition-transform hover:scale-[1.02] active:scale-[.99]"
             style={{
               background: 'linear-gradient(135deg, #EF4444, #F97316)',
@@ -251,6 +255,7 @@ const FixItUrgencyCard = ({ urgency, openTasks = [], totalTasks = 0, currency = 
             Fix it now
             <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
           </button>
+          )}
         </div>
       </div>
 
