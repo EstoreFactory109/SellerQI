@@ -37,7 +37,7 @@ const {
     isEsfOwner,
     resolveEsfRole,
     canManageTeam,
-    canSeeClientIdentity, canViewClientActivity,
+    canSeeClientIdentity, canViewClientActivity, canManageBilling,
 } = require('../../Services/User/esfRoles.js');
 const { splitStaffName } = require('../../Services/User/staffName.js');
 const {
@@ -290,10 +290,14 @@ const getEsfClients = asyncHandler(async (req, res) => {
 
     // Activity (last active) for owner/admins only — members never receive it.
     const showActivity = canViewClientActivity(req.esfUser);
-    const activity = showActivity && clients.length
-        ? await UserModel.find({ _id: { $in: clients.map((c) => c._id) } }).select('lastActiveAt').lean()
+    // Billing link status, for the same owner/admins (billing is financial; members never see it).
+    const showBilling = canManageBilling(req.esfUser);
+    const activity = (showActivity || showBilling) && clients.length
+        ? await UserModel.find({ _id: { $in: clients.map((c) => c._id) } })
+            .select('lastActiveAt zohoBilling.customerId zohoBilling.customerName zohoBilling.linkSource').lean()
         : [];
     const lastActiveById = new Map(activity.map((a) => [String(a._id), a.lastActiveAt || null]));
+    const billingById = new Map(activity.map((a) => [String(a._id), a.zohoBilling || {}]));
 
     const withAddedBy = clients.map((client) => ({
         ...client,
@@ -301,6 +305,15 @@ const getEsfClients = asyncHandler(async (req, res) => {
         ...(showActivity ? {
             lastActiveAt: lastActiveById.get(String(client._id)) || null,
             isActiveNow: isActiveNow(lastActiveById.get(String(client._id))),
+        } : {}),
+        ...(showBilling ? {
+            billing: billingById.get(String(client._id))?.customerId
+                ? {
+                    linked: true,
+                    customerName: billingById.get(String(client._id)).customerName || null,
+                    linkSource: billingById.get(String(client._id)).linkSource || 'email',
+                }
+                : { linked: false },
         } : {}),
     }));
 

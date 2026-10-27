@@ -6,6 +6,7 @@ const { getAdminEmailLogs } = require('../controllers/admin/AdminEmailLogsContro
 const { getAdminTicketMessages } = require('../controllers/admin/AdminTicketMessagesController.js');
 const { getAdminUserSessions, getAdminUserErrorLogs, getAdminUserSessionDetails } = require('../controllers/admin/AdminUserLogsController.js');
 const { getActivityOverview, getUserActivity } = require('../controllers/admin/AdminActivityController.js');
+const { getAccountBillingOptions, linkAccountBilling, unlinkAccountBilling } = require('../controllers/admin/AdminBillingLinkController.js');
 const superAdminAuth = require('../middlewares/Auth/superAdminAuth.js');
 const { authRateLimiter } = require('../middlewares/rateLimiting.js');
 const { validateAdminLogin } = require('../middlewares/validator/adminValidate.js');
@@ -20,6 +21,10 @@ router.get('/admin/accounts', superAdminAuth, getAllAccounts);
 // Seller activity monitoring (last active, pages viewed).
 router.get('/admin/activity', superAdminAuth, getActivityOverview);
 router.get('/admin/activity/users/:userId', superAdminAuth, getUserActivity);
+// Link an ESF client to their Zoho Billing customer when the emails differ.
+router.get('/admin/accounts/:userId/billing-options', superAdminAuth, getAccountBillingOptions);
+router.post('/admin/accounts/:userId/billing', superAdminAuth, linkAccountBilling);
+router.delete('/admin/accounts/:userId/billing', superAdminAuth, unlinkAccountBilling);
 router.get('/admin/accounts/export', superAdminAuth, exportAllAccountsCsv);
 router.get('/admin/accounts/country-stats', superAdminAuth, getCountryStats);
 router.get('/admin/accounts/:agencyId/clients', superAdminAuth, getAgencyClients);

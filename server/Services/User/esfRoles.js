@@ -109,8 +109,15 @@ const canSeeClientIdentity = (user) => {
  */
 const canViewClientActivity = (user) => canManageTaskRequests(user);
 
+/**
+ * Who may link a client to (or unlink from) their Zoho Billing customer: billing is financial,
+ * so owner, admins and platform superAdmins — never members.
+ */
+const canManageBilling = (user) => canManageTaskRequests(user);
+
 module.exports = {
     canViewClientActivity,
+    canManageBilling,
     ESF_ROLES,
     ASSIGNABLE_ESF_ROLES,
     ESF_OWNER_EMAIL,

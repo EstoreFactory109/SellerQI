@@ -380,7 +380,11 @@ const buildAccountsPipeline = (filters) => {
             adminId: 1,
             sellerCentral: 1,
             // Activity monitoring: shown as the "Last active" column.
-            lastActiveAt: 1
+            lastActiveAt: 1,
+            // ESF clients get a "Link Zoho Billing" action; the customer name labels it.
+            isEsfClient: 1,
+            'zohoBilling.customerId': 1,
+            'zohoBilling.customerName': 1
         }
     });
 

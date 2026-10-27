@@ -16,15 +16,17 @@ import {
   FolderGit2,
   Lock,
   Radio,
+  Receipt,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import EsfAddClientForm from '../../Components/ESF/EsfAddClientForm.jsx';
 import EsfExistingUsersPicker from '../../Components/ESF/EsfExistingUsersPicker.jsx';
 import EsfConnectProjectModal from '../../Components/ESF/EsfConnectProjectModal.jsx';
+import EsfConnectBillingModal from '../../Components/ESF/EsfConnectBillingModal.jsx';
 import { useEsfUser } from '../../contexts/EsfUserContext.js';
 import LastActiveBadge from '../../Components/Activity/LastActiveBadge.jsx';
 import UserActivityDrawer from '../../Components/Activity/UserActivityDrawer.jsx';
-import { canViewClientActivity } from '../../utils/esfActivityAccess.js';
+import { canViewClientActivity, canManageClientBilling } from '../../utils/esfActivityAccess.js';
 
 const ITEMS_PER_PAGE = 10;
 const DROPDOWN_MENU_WIDTH = 180;
@@ -38,8 +40,11 @@ const EsfClients = () => {
   const canRemoveClients = signedInUser?.esfRole === 'owner' || signedInUser?.esfRole === 'admin';
   // Activity monitoring is for the owner and admins; the server sends members no activity at all.
   const showActivity = canViewClientActivity(signedInUser);
-  const menuHeight = DROPDOWN_MENU_ITEM_HEIGHT * (2 + (canRemoveClients ? 1 : 0) + (showActivity ? 1 : 0));
+  // Linking a client's Zoho Billing customer is financial: owner and admins only (the server agrees).
+  const showBilling = canManageClientBilling(signedInUser);
+  const menuHeight = DROPDOWN_MENU_ITEM_HEIGHT * (2 + (canRemoveClients ? 1 : 0) + (showActivity ? 1 : 0) + (showBilling ? 1 : 0));
   const [activityClient, setActivityClient] = useState(null);
+  const [billingModalClient, setBillingModalClient] = useState(null);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -300,6 +305,9 @@ const EsfClients = () => {
                       <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider min-w-[150px]">Client</th>
                       <th className="px-2 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Brand</th>
                       <th className="px-2 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Project</th>
+                      {showBilling && (
+                        <th className="px-2 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Billing</th>
+                      )}
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">SpAPI</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Ads</th>
                       <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">Added By</th>
@@ -375,6 +383,26 @@ const EsfClients = () => {
                               </button>
                             )}
                           </td>
+                          {showBilling && (
+                            <td className="px-2 py-2.5 text-xs">
+                              {client.billing?.linked ? (
+                                <span
+                                  className="line-clamp-2 text-gray-300"
+                                  title={client.billing.linkSource === 'manual' ? 'Linked by hand' : 'Linked automatically by email'}
+                                >
+                                  {client.billing.customerName || 'Linked'}
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setBillingModalClient(client)}
+                                  className="text-gray-500 hover:text-blue-400 transition-colors"
+                                >
+                                  Link
+                                </button>
+                              )}
+                            </td>
+                          )}
                           <td className="px-2 py-2.5 text-center text-xs">
                             {connectionCell(client.hasSpApi === true, 'Seller account')}
                           </td>
@@ -626,6 +654,20 @@ const EsfClients = () => {
                     <FolderGit2 className="w-3.5 h-3.5" />
                     {client.zohoProject?.projectId ? 'Change project' : 'Connect a project'}
                   </button>
+                  {showBilling && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenDropdownId(null);
+                        setDropdownPosition(null);
+                        setBillingModalClient(client);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
+                    >
+                      <Receipt className="w-3.5 h-3.5" />
+                      {client.billing?.linked ? 'Change billing' : 'Link billing'}
+                    </button>
+                  )}
                   {canRemoveClients && (
                   <button
                     type="button"
@@ -702,6 +744,15 @@ const EsfClients = () => {
           <EsfConnectProjectModal
             client={projectModalClient}
             onClose={() => setProjectModalClient(null)}
+            onChanged={fetchClients}
+          />
+        )}
+
+        {billingModalClient && showBilling && (
+          <EsfConnectBillingModal
+            client={billingModalClient}
+            baseUrl={`/app/esf/clients/${billingModalClient._id}`}
+            onClose={() => setBillingModalClient(null)}
             onChanged={fetchClients}
           />
         )}

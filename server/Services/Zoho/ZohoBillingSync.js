@@ -109,7 +109,31 @@ const resolveCustomerId = async (user) => {
         return { customerId: user.zohoBilling.customerId, newlyLinked: false };
     }
 
-    const customer = await ZohoBillingService.findCustomerByEmail(user.email);
+    // An admin unlinked this client on purpose: never re-link it behind their back.
+    if (user.zohoBilling?.autoMatchDisabled) return null;
+
+    // The login email first, then any extra address the client has VERIFIED — a client's
+    // Billing record is often under a company alias they also added to SellerQI.
+    const emails = [user.email, ...(user.additionalEmails || []).filter((e) => e?.isVerified).map((e) => e.email)]
+        .filter(Boolean)
+        .filter((e, i, list) => list.findIndex((x) => x.toLowerCase() === e.toLowerCase()) === i);
+
+    let customer = null;
+    let matchedEmail = null;
+    for (const email of emails) {
+        const found = await ZohoBillingService.findCustomerByEmail(email);
+        if (!found) continue;
+        // Never auto-link a customer another account already has: both accounts' syncs
+        // would then fight over the same invoices (unique by invoiceId). An admin decides.
+        const taken = await UserModel.exists({ _id: { $ne: user._id }, 'zohoBilling.customerId': found.customerId });
+        if (taken) {
+            logger.warn(`[ZohoBillingSync] ${email} matches Billing customer ${found.customerId}, already linked to another account — not auto-linking`);
+            continue;
+        }
+        customer = found;
+        matchedEmail = email;
+        break;
+    }
 
     if (!customer) {
         // Stamp the failed lookup so the sweep can back off rather than asking again
@@ -125,13 +149,15 @@ const resolveCustomerId = async (user) => {
             $set: {
                 'zohoBilling.customerId': customer.customerId,
                 'zohoBilling.customerName': customer.companyName,
-                'zohoBilling.matchedEmail': user.email,
+                'zohoBilling.matchedEmail': matchedEmail,
                 'zohoBilling.linkedAt': new Date(),
+                'zohoBilling.linkSource': 'email',
+                'zohoBilling.linkedBy': null,
             },
         }
     );
 
-    logger.info(`[ZohoBillingSync] Linked ${user.email} to Billing customer ${customer.customerId} (${customer.companyName})`);
+    logger.info(`[ZohoBillingSync] Linked ${user.email} to Billing customer ${customer.customerId} (${customer.companyName}) by ${matchedEmail}`);
     return { customerId: customer.customerId, newlyLinked: true };
 };
 
@@ -312,7 +338,7 @@ const syncClient = async (user) => {
  */
 const syncAllBilling = async ({ force = false, now = new Date() } = {}) => {
     const clients = await UserModel.find({ isEsfClient: true })
-        .select('_id email zohoBilling')
+        .select('_id email additionalEmails zohoBilling')
         .lean();
 
     const profiles = await EsfBillingProfile

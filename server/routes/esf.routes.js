@@ -53,6 +53,7 @@ const {
     downloadTaskRequestAttachment,
 } = require('../controllers/esf/esfTaskRequests.js');
 const esfAuth = require('../middlewares/Auth/esfAuth.js');
+const { getClientBillingOptions, linkClientBilling, unlinkClientBilling } = require('../controllers/esf/esfBilling.js');
 const { getClientActivityOverview, getClientActivity } = require('../controllers/esf/esfActivity.js');
 const { refuseIfOtherSession } = require('../middlewares/Auth/singleSession.js');
 const gmailUpload = require('../middlewares/multer/gmailUpload.js');
@@ -105,6 +106,10 @@ router.delete('/clients/:clientId', esfAuth, removeEsfClient);
 // Connecting a client to an existing Zoho project. Projects are created in
 // Zoho, never here — see controllers/esf/esfProjects.js.
 router.get('/clients/:clientId/project-options', esfAuth, getClientProjectOptions);
+// Link a client to their Zoho Billing customer when the emails differ (owner/admins only).
+router.get('/clients/:clientId/billing-options', esfAuth, getClientBillingOptions);
+router.post('/clients/:clientId/billing', esfAuth, linkClientBilling);
+router.delete('/clients/:clientId/billing', esfAuth, unlinkClientBilling);
 router.post('/clients/:clientId/project', esfAuth, validateLinkProject, linkClientProject);
 router.delete('/clients/:clientId/project', esfAuth, unlinkClientProject);
 

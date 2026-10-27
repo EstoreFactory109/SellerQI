@@ -31,6 +31,9 @@ const PAGE_SIZE = 200;
 // runaway customer must not walk forever.
 const MAX_INVOICE_PAGES = 10;
 
+/** Enough for 5,000 customers; the admin picker searches this list locally. */
+const MAX_CUSTOMER_PAGES = 25;
+
 /** Every Billing call shares this. */
 const billingRequest = (options) => zohoRequest({
     ...options,
@@ -235,6 +238,28 @@ const findCustomerByEmail = async (email) => {
     return exact ? normaliseCustomer(exact) : null;
 };
 
+/**
+ * Every Billing customer, for the admin's "link billing" picker.
+ *
+ * Searched locally (Services/Zoho/ZohoBillingLinks.js) rather than with Zoho's search
+ * parameters: only `email_contains` has ever been verified against this account, and the
+ * whole point of the picker is to find customers whose email does NOT match.
+ */
+const listCustomers = async () => {
+    const all = [];
+    for (let page = 1; page <= MAX_CUSTOMER_PAGES; page += 1) {
+        const response = await billingRequest({
+            path: BILLING_PATHS.customers(),
+            params: { per_page: PAGE_SIZE, page },
+            context: 'Listing Zoho Billing customers',
+        });
+        const rows = response.customers || [];
+        all.push(...rows.map(normaliseCustomer).filter((c) => c.customerId));
+        if (!response.page_context?.has_more_page || rows.length === 0) break;
+    }
+    return all;
+};
+
 const getCustomer = async (customerId) => {
     if (!customerId) throw new ApiError(400, 'A Zoho Billing customer id is required');
 
@@ -378,6 +403,7 @@ module.exports = {
     parseCoveragePeriodEnd,
     getInvoicePdf,
     findCustomerByEmail,
+    listCustomers,
     getCustomer,
     getCustomerCards,
     listInvoices,
