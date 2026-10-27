@@ -204,6 +204,13 @@ const userSchema = new mongoose.Schema(
         // anyone. Without it a client with no Billing record is re-looked-up every
         // night forever, which is the one cost the due-rule exists to avoid.
         lastLookupAt: { type: Date, default: null },
+        // How the link was made: 'email' (the nightly match) or 'manual' (an admin picked
+        // the customer, because the Billing email differs from the SellerQI one), and by whom.
+        linkSource: { type: String, enum: ['email', 'manual', null], default: null },
+        linkedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+        // Set when an admin UNLINKS: stops the nightly email match quietly re-linking the
+        // customer they just removed. Cleared by the next manual link.
+        autoMatchDisabled: { type: Boolean, default: false },
       },
       /**
        * Stable anonymous reference for this client, e.g. "EF-1184".
@@ -424,6 +431,8 @@ userSchema.index({ packageType: 1 });
 userSchema.index({ subscriptionStatus: 1 });
 userSchema.index({ isInTrialPeriod: 1 });
 userSchema.index({ isVerified: 1 });
+// Who is linked to a Zoho Billing customer — duplicate checks on manual and email links.
+userSchema.index({ 'zohoBilling.customerId': 1 });
 userSchema.index({ agencyId: 1 });
 userSchema.index({ isAgencyClient: 1 });
 // Compound indexes for common queries

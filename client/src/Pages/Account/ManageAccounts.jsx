@@ -24,10 +24,12 @@ import {
   RefreshCw,
   Clock,
   Radio,
+  Receipt,
 } from 'lucide-react';
 import axiosInstance from '../../config/axios.config.js';
 import LastActiveBadge from '../../Components/Activity/LastActiveBadge.jsx';
 import UserActivityDrawer from '../../Components/Activity/UserActivityDrawer.jsx';
+import EsfConnectBillingModal from '../../Components/ESF/EsfConnectBillingModal.jsx';
 
 // Left padding of the User cell per nesting level: top-level, an agency client or
 // a member, and a member of an agency client.
@@ -195,11 +197,12 @@ const ManageAccounts = () => {
   const [openDropdownId, setOpenDropdownId] = useState(null);
   // Seller whose activity drawer is open (activity monitoring).
   const [activityUser, setActivityUser] = useState(null);
+  const [billingUser, setBillingUser] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState(null);
   const dropdownRef = useRef(null);
   const openDropdownButtonRef = useRef(null);
   const DROPDOWN_MENU_WIDTH = 160;
-  const DROPDOWN_MENU_HEIGHT = 156;
+  const DROPDOWN_MENU_HEIGHT = 192;
 
   const handleExportCsv = async () => {
     try {
@@ -1305,6 +1308,15 @@ const ManageAccounts = () => {
             title={activityUser ? `${activityUser.firstName || ''} ${activityUser.lastName || ''}`.trim() : ''}
           />
 
+          {billingUser && (
+            <EsfConnectBillingModal
+              client={billingUser}
+              baseUrl={`/app/auth/admin/accounts/${billingUser._id}`}
+              onClose={() => setBillingUser(null)}
+              onChanged={() => fetchAccounts({ quiet: true })}
+            />
+          )}
+
           {/* Change Trial Period Modal */}
           {trialUser && (
             <div
@@ -1560,6 +1572,21 @@ const ManageAccounts = () => {
                   <Radio className="w-3.5 h-3.5" />
                   View activity
                 </button>
+                {/* ESF clients only: their invoices come from Zoho Billing (the server checks too). */}
+                {user.isEsfClient && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdownId(null);
+                      setDropdownPosition(null);
+                      setBillingUser(user);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-[#252525] hover:text-gray-100"
+                  >
+                    <Receipt className="w-3.5 h-3.5" />
+                    {user.zohoBilling?.customerId ? 'Change Zoho Billing' : 'Link Zoho Billing'}
+                  </button>
+                )}
                 {canLoginAs && (
                 <button
                   type="button"
