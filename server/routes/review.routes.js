@@ -4,6 +4,7 @@ const authMiddleware = require("../middlewares/Auth/auth.js");
 const { getLocation } = require("../middlewares/Auth/getLocation.js");
 const {
   getRecentOrders,
+  getReviewSummary,
   getOrderItems,
   getReviewAuthStatus,
   toggleReviewAuthStatus,
@@ -11,6 +12,7 @@ const {
 
 // Protected routes: require auth + location context
 router.get("/recent-orders", authMiddleware, getLocation, getRecentOrders);
+router.get("/summary", authMiddleware, getLocation, getReviewSummary);
 router.get("/order-items/:amazonOrderId", authMiddleware, getLocation, getOrderItems);
 
 // Review request auto-send toggle (auth only, no location needed)

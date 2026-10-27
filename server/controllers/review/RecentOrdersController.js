@@ -2,6 +2,80 @@ const ReviewOrder = require("../../models/review/ReviewOrderModel");
 const ReviewOrderItem = require("../../models/review/ReviewOrderItemModel");
 const User = require("../../models/user-auth/userModel");
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+// No delivery date is stored, so the request window (5-30 days after delivery) is
+// placed from the order date: it has closed for an order about 35 days old.
+const WINDOW_CLOSED_AFTER_DAYS = 35;
+// Eligibility goes stale as the window moves; only a recent check counts as "now".
+const ELIGIBILITY_FRESH_DAYS = 3;
+
+// The window the sender works in (Services/review/orders.js), by order age.
+const { ORDER_CONFIG } = require("../../Services/review/orders.js");
+
+/**
+ * Pure: why a review request can't be sent for this order, in the seller's words, or
+ * null when it can. Amazon gives a reason only for some orders (as an error on the
+ * eligibility check); otherwise the reason comes from what SellerQI knows: the order's
+ * age, whether it was checked with Amazon, and whether auto-send is on (eligibility is
+ * only checked for accounts with auto-send on, for orders 5-30 days old).
+ * @param {Object} order - ReviewOrder fields
+ * @param {{now?: Date, autoSend?: boolean}} [ctx]
+ * @returns {string|null}
+ */
+function reviewIneligibleReason(order, { now = new Date(), autoSend = false } = {}) {
+  if (!order) return null;
+  if (order.reviewRequestStatus === "sent") {
+    const at = order.reviewRequestLastSentAt ? new Date(order.reviewRequestLastSentAt) : null;
+    return at ? `Already requested on ${at.toISOString().slice(0, 10)}` : "Already requested";
+  }
+  if (order.reviewRequestStatus === "failed") {
+    return `Sending failed${order.reviewRequestError ? `: ${String(order.reviewRequestError).slice(0, 140)}` : ""}`;
+  }
+  if (order.canRequestReview === true) return null;
+
+  const error = String(order.eligibilityResponse?.errors?.[0]?.message || "");
+  if (/multi-channel/i.test(error)) return "Multi-channel order: Amazon doesn't allow review requests";
+  if (/denied|unauthori[sz]ed/i.test(error)) return "Amazon refused access for this account";
+  if (error) return `Amazon said: ${error.slice(0, 140)}`;
+
+  const ageDays = order.purchaseDate ? (now.getTime() - new Date(order.purchaseDate).getTime()) / DAY_MS : null;
+  if (ageDays !== null && ageDays < ORDER_CONFIG.minOrderAgeDays) return "Too early: requests open 5 days after delivery";
+  if (ageDays !== null && ageDays > ORDER_CONFIG.maxOrderAgeDays) return "Past the 30-day request window";
+  if (order.eligibilityLastCheckedAt) {
+    return "Amazon allows no request for this order right now (already requested in Seller Central, or not delivered yet)";
+  }
+  return autoSend
+    ? "Waiting for SellerQI's next check with Amazon"
+    : "Not checked with Amazon: turn on Auto review requests";
+}
+
+/**
+ * Pure: new ratings between two weekly snapshots.
+ * - Variations share one rating count, so each (before, after) pair counts once
+ *   (seen live: 30 variations all 180 -> 193 is 13 new ratings, not 390).
+ * - A product missing from either snapshot, or at 0 before, is skipped (unknown).
+ * - A jump no real listing makes in a month (to over 1.5x + 50) is a scrape of a
+ *   different listing (seen live: 214 -> 32,887) and is skipped.
+ * @returns {number}
+ */
+function newRatingsBetween(base, latest) {
+  const before = new Map((base?.Products || []).map((p) => [p.asin, Number(p.product_num_ratings)]));
+  const pairs = new Set();
+  for (const p of latest?.Products || []) {
+    const now = Number(p?.product_num_ratings);
+    const was = before.get(p?.asin);
+    if (!Number.isFinite(now) || !Number.isFinite(was) || !(was > 0) || !(now > was)) continue;
+    if (now > was * 1.5 + 50) continue;
+    pairs.add(`${was}>${now}`);
+  }
+  let total = 0;
+  for (const pair of pairs) {
+    const [was, now] = pair.split('>').map(Number);
+    total += now - was;
+  }
+  return total;
+}
+
 /**
  * GET /api/review/recent-orders
  * Query params: page, limit
@@ -35,9 +109,12 @@ const getRecentOrders = async (req, res) => {
       isArchived: false,
     };
 
-    const [orders, total] = await Promise.all([
+    const [rawOrders, total, owner] = await Promise.all([
+      // Order date only: the { User, country, region, purchaseDate } index serves it.
+      // A createdAt tie-breaker forced an in-memory sort of every order (14 s on a
+      // 615k-order account; 52 ms without it).
       ReviewOrder.find(filter)
-        .sort({ purchaseDate: -1, createdAt: -1 })
+        .sort({ purchaseDate: -1 })
         .skip(skip)
         .limit(limit)
         .select({
@@ -50,10 +127,26 @@ const getRecentOrders = async (req, res) => {
           canRequestReview: 1,
           reviewRequestStatus: 1,
           reviewRequestLastSentAt: 1,
+          reviewRequestError: 1,
+          eligibilityLastCheckedAt: 1,
+          "eligibilityResponse.errors": 1,
         })
         .lean(),
       ReviewOrder.countDocuments(filter),
+      User.findById(userId).select({ reviewRequestAuthStatus: 1 }).lean(),
     ]);
+
+    // Each order carries why it can't be sent (null when it can); the raw Amazon
+    // answer stays on the server.
+    const now = new Date();
+    const autoSend = !!owner?.reviewRequestAuthStatus;
+    const orders = rawOrders.map(({ eligibilityResponse, eligibilityLastCheckedAt, reviewRequestError, ...o }) => ({
+      ...o,
+      notEligibleReason: reviewIneligibleReason(
+        { ...o, eligibilityResponse, eligibilityLastCheckedAt, reviewRequestError },
+        { now, autoSend }
+      ),
+    }));
 
     const totalPages = Math.ceil(total / limit) || 1;
 
@@ -242,7 +335,90 @@ const toggleReviewAuthStatus = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/review/summary
+ *
+ * The four numbers at the top of the Review Requests page, for this marketplace:
+ * - eligibleNow: Amazon allows a request (recent eligibility check) and none was sent
+ * - inWindowUnchecked: orders in the request window by date (7-33 days old) that were
+ *   never checked with Amazon (eligibility is checked only for some accounts and
+ *   orders), shown as "may be eligible", never as confirmed
+ * - requestedThisMonth: requests sent since the 1st (UTC)
+ * - ratingsThisMonth: new ratings on the seller's products since the 1st, from the
+ *   weekly ratings snapshots (Amazon does not link a review to an order); null when
+ *   there is no snapshot from this month and one from before it
+ * - windowClosedThisMonth: orders whose window closed this month with no request,
+ *   leaving out orders Amazon never allows (eligibility answered with an error)
+ */
+const getReviewSummary = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { country, region } = req;
+    if (!userId || !country || !region) {
+      return res.status(400).json({ success: false, error: "Missing user context (userId, country, region)." });
+    }
+    const NumberOfProductReviews = require("../../models/seller-performance/NumberOfProductReviewsModel.js");
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const base = { User: userId, country, region, isArchived: false };
+    const neverSent = { $in: ["not_requested", "queued", "failed"] };
+
+    const [eligibleNow, inWindowUnchecked, requestedThisMonth, windowClosedThisMonth, latestSnap, baseSnap] = await Promise.all([
+      ReviewOrder.countDocuments({
+        ...base,
+        purchaseDate: { $gte: new Date(now.getTime() - 45 * DAY_MS) },
+        canRequestReview: true,
+        reviewRequestStatus: neverSent,
+        eligibilityLastCheckedAt: { $gte: new Date(now.getTime() - ELIGIBILITY_FRESH_DAYS * DAY_MS) },
+      }),
+      ReviewOrder.countDocuments({
+        ...base,
+        purchaseDate: { $gte: new Date(now.getTime() - 33 * DAY_MS), $lt: new Date(now.getTime() - 7 * DAY_MS) },
+        reviewRequestStatus: neverSent,
+        eligibilityLastCheckedAt: null,
+      }),
+      ReviewOrder.countDocuments({
+        ...base,
+        purchaseDate: { $gte: new Date(monthStart.getTime() - 60 * DAY_MS) },
+        reviewRequestStatus: "sent",
+        reviewRequestLastSentAt: { $gte: monthStart },
+      }),
+      ReviewOrder.countDocuments({
+        ...base,
+        purchaseDate: {
+          $gte: new Date(monthStart.getTime() - WINDOW_CLOSED_AFTER_DAYS * DAY_MS),
+          $lt: new Date(now.getTime() - WINDOW_CLOSED_AFTER_DAYS * DAY_MS),
+        },
+        reviewRequestStatus: neverSent,
+        "eligibilityResponse.errors.0": { $exists: false },
+      }),
+      NumberOfProductReviews.findOne({ User: userId, country, region, createdAt: { $gte: monthStart } })
+        .sort({ createdAt: -1 }).select({ createdAt: 1, "Products.asin": 1, "Products.product_num_ratings": 1 }).lean(),
+      NumberOfProductReviews.findOne({ User: userId, country, region, createdAt: { $lt: monthStart, $gte: new Date(monthStart.getTime() - 14 * DAY_MS) } })
+        .sort({ createdAt: -1 }).select({ createdAt: 1, "Products.asin": 1, "Products.product_num_ratings": 1 }).lean(),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      monthStart,
+      eligibleNow,
+      inWindowUnchecked,
+      requestedThisMonth,
+      windowClosedThisMonth,
+      ratingsThisMonth: latestSnap && baseSnap
+        ? { count: newRatingsBetween(baseSnap, latestSnap), asOf: latestSnap.createdAt }
+        : null,
+    });
+  } catch (error) {
+    console.error("❌ Error in getReviewSummary:", error.message);
+    return res.status(500).json({ success: false, error: error.message || "Failed to fetch review summary" });
+  }
+};
+
 module.exports = {
+  getReviewSummary,
+  reviewIneligibleReason,
+  newRatingsBetween,
   getRecentOrders,
   getOrderItems,
   getReviewAuthStatus,
