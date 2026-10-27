@@ -232,7 +232,7 @@ const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '
               {selected
                 ? `${selected.name}: ${selected.tasks} tasks for ${formatPrice(selected.price)}`
                 : 'Select a package to continue.'}
-              {onPurchase && ' Secure payment by Stripe.'}
+              {onPurchase && selected && ' · Secure payment by Stripe'}
             </p>
             <button
               type="button"
