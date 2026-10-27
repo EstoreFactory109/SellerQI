@@ -5,6 +5,7 @@ const User = require('../../models/user-auth/userModel');
 const PaymentLogs = require('../../models/system/PaymentLogsModel');
 const logger = require('../../utils/Logger');
 const { sendTrialToProSupportEmail } = require('../Email/SendTrialToProSupportEmail');
+const FixItCheckoutService = require('./FixItCheckoutService');
 
 class StripeWebhookService {
     constructor() {
@@ -165,6 +166,13 @@ class StripeWebhookService {
      */
     async handleCheckoutSessionCompleted(session, webhookEventId = null) {
         try {
+            // A "Fix it" package (one-time payment) has no planType and must never touch the
+            // subscription — handled entirely by FixItCheckoutService.
+            if (session.metadata?.purchaseType === FixItCheckoutService.PURCHASE_TYPE) {
+                await FixItCheckoutService.completeFixItPurchase(session, { source: 'WEBHOOK', webhookEventId });
+                return;
+            }
+
             const userId = session.metadata?.userId;
             const planType = session.metadata?.planType;
 
@@ -916,6 +924,8 @@ class StripeWebhookService {
      */
     async handleCheckoutSessionExpired(session, webhookEventId = null) {
         try {
+            if (await FixItCheckoutService.expireFixItCheckout(session)) return;
+
             const userId = session.metadata?.userId;
             const planType = session.metadata?.planType;
 
@@ -993,6 +1003,10 @@ class StripeWebhookService {
             const isFullRefund = amountRefunded >= amountTotal;
 
             logger.info(`Charge refunded: ${chargeId}, customer: ${customerId}, refunded: ${amountRefunded}, total: ${amountTotal}, fullRefund: ${isFullRefund}`);
+
+            // A refunded Fix it package shares the Stripe customer with a PRO seller's
+            // subscription; it must not mark that subscription refunded.
+            if (await FixItCheckoutService.handleFixItRefund(charge, webhookEventId)) return;
 
             // Find subscription by customer ID
             const dbSubscription = await Subscription.findOne({ stripeCustomerId: customerId });

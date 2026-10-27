@@ -35,6 +35,7 @@ import BulkApproveModal from '../../Components/Tasks/BulkApproveModal.jsx';
 import axiosInstance from '../../config/axios.config.js';
 import { openTasksOf, summarizeUrgency } from '../../utils/taskUrgency.js';
 import { trackEvent } from '../../utils/analytics.js';
+import stripeService from '../../services/stripeService.js';
 
 // tasks-logics.xlsx priority labels. Word + colour, never colour alone.
 const PRIORITY_BADGE = {
@@ -223,6 +224,8 @@ export default function Tasks() {
   const dispatch = useDispatch();
   const [searchQuery, setSearchQuery] = useState('');
   const [showFixIt, setShowFixIt] = useState(false);
+  const [fixItPurchasing, setFixItPurchasing] = useState(false);
+  const [fixItError, setFixItError] = useState('');
   // The task whose "approve this change on Amazon" dialog is open.
   const [approveTask, setApproveTask] = useState(null);
   // Several selected ad changes approved together.
@@ -569,7 +572,42 @@ export default function Tasks() {
       open_tasks: urgency.openCount,
       monthly_recoverable: urgency.monthlyRecoverable,
     });
+    setFixItError('');
     setShowFixIt(true);
+  };
+
+  // Buying a package: off to Stripe Checkout. On success the page is left, so only a
+  // failure brings us back here.
+  const purchaseFixIt = async (pkg) => {
+    setFixItPurchasing(true);
+    setFixItError('');
+    try {
+      await stripeService.startFixItCheckout({
+        packageId: pkg.id,
+        openTasks: urgency.openCount,
+        monthlyRecoverable: urgency.monthlyRecoverable,
+        atStakeCurrency: currency,
+      });
+    } catch (err) {
+      setFixItError(err.response?.data?.message || "Couldn't start checkout. Please try again.");
+      setFixItPurchasing(false);
+    }
+  };
+
+  // The browser Back button from Stripe can restore this page from cache with the button
+  // still saying "Redirecting…" — clear it.
+  useEffect(() => {
+    const onShow = (e) => { if (e.persisted) setFixItPurchasing(false); };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
+
+  // Back from Stripe without paying (cancel_url adds ?fixit=cancelled).
+  const fixItCancelled = searchParams.get('fixit') === 'cancelled';
+  const dismissFixItCancelled = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('fixit');
+    setSearchParams(next, { replace: true });
   };
 
   // "1 of 93 keywords spending money with zero sales · A$187.41 total" — shown on
@@ -763,6 +801,19 @@ export default function Tasks() {
 
       {/* One card: what the open tasks cost, what threatens the account, and the
           way out. Every figure comes from the seller's own open tasks. */}
+      {fixItCancelled && (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 mb-2 px-3 py-2 rounded-lg border text-[13px]"
+          style={{ borderColor: COLORS.border, background: COLORS.surface, color: COLORS.textSecondary }}
+        >
+          <span>Payment cancelled — nothing was charged. You can pick a package again any time.</span>
+          <button type="button" onClick={dismissFixItCancelled} className="text-xs underline" style={{ color: COLORS.textMuted }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <FixItUrgencyCard
         urgency={urgency}
         openTasks={openTasks}
@@ -1246,6 +1297,9 @@ export default function Tasks() {
         onClose={() => setShowFixIt(false)}
         openTasks={openTasks}
         currency={currency}
+        onPurchase={FIX_IT_PACKAGES ? purchaseFixIt : undefined}
+        purchasing={fixItPurchasing}
+        purchaseError={fixItError}
       />
 
       <BulkApproveModal

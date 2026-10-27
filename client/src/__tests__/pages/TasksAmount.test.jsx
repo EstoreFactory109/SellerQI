@@ -14,13 +14,16 @@ import Tasks from '../../Pages/Tools/Tasks.jsx';
 
 // The component dispatches a fetch thunk on mount; stub the network layer so the
 // pre-seeded store state is what renders.
-// The Fix it packages are off by default (VITE_FIX_IT_PACKAGES); most tests here cover them, so
-// they run with the switch on. The "switched off" block below flips it.
+// The Fix it packages are on by default (VITE_FIX_IT_PACKAGES=false hides them); the
+// "switched off" block below flips it.
 const flags = vi.hoisted(() => ({ FIX_IT_PACKAGES: true }));
 vi.mock('../../utils/featureFlags.js', async (importOriginal) => ({
   ...(await importOriginal()),
   get FIX_IT_PACKAGES() { return flags.FIX_IT_PACKAGES; },
 }));
+
+const stripe = vi.hoisted(() => ({ startFixItCheckout: vi.fn() }));
+vi.mock('../../services/stripeService.js', () => ({ default: stripe }));
 
 vi.mock('../../redux/slices/TasksSlice.js', async () => {
   const actual = await vi.importActual('../../redux/slices/TasksSlice.js');
@@ -337,6 +340,35 @@ describe('Tasks page - Fix it', () => {
     fireEvent.click(screen.getByLabelText('Close'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('Purchase goes to Stripe checkout with the package and what the seller is looking at', async () => {
+    stripe.startFixItCheckout.mockReturnValue(new Promise(() => {})); // the page is left for Stripe
+    renderTasks();
+    fireEvent.click(screen.getByRole('button', { name: /Fix it/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Standard/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Purchase for $299' }));
+    expect(stripe.startFixItCheckout).toHaveBeenCalledWith({
+      packageId: 'standard', openTasks: 9, monthlyRecoverable: 1007.03, atStakeCurrency: 'A$',
+    });
+    expect(await screen.findByRole('button', { name: 'Redirecting to secure checkout…' })).toBeDisabled();
+  });
+
+  it('says so when checkout cannot start, and lets the seller try again', async () => {
+    stripe.startFixItCheckout.mockRejectedValue({ response: { data: { message: 'Fix it packages cannot be bought right now. Please contact support.' } } });
+    renderTasks();
+    fireEvent.click(screen.getByRole('button', { name: /Fix it/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Trial/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Purchase for $25' }));
+    expect(await screen.findByText(/cannot be bought right now/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Purchase for $25' })).toBeEnabled();
+  });
+
+  it('back from Stripe without paying: says nothing was charged', () => {
+    renderTasks(TASKS, { route: '/?fixit=cancelled' });
+    expect(screen.getByText(/Payment cancelled — nothing was charged/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText(/Payment cancelled/)).not.toBeInTheDocument();
+  });
 });
 
 describe('Tasks page - urgency card', () => {
@@ -469,7 +501,7 @@ describe('Tasks page - urgency card', () => {
   });
 });
 
-describe('Tasks page - Fix it switched off (the default)', () => {
+describe('Tasks page - Fix it switched off (VITE_FIX_IT_PACKAGES=false)', () => {
   beforeEach(() => { flags.FIX_IT_PACKAGES = false; });
   afterEach(() => { flags.FIX_IT_PACKAGES = true; });
 

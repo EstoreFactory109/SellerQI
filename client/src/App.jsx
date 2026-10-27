@@ -40,6 +40,7 @@ import LoadingPage from './Pages/Static/LoadingPage.jsx';
 import ResultsPage from './Pages/Static/ResultsPage.jsx';
 import RefundPolicy from './Pages/Static/RefundPolicy.jsx';
 import SubscriptionSuccess from './Pages/Payment/SubscriptionSuccess.jsx';
+import FixItSuccess from './Pages/Payment/FixItSuccess.jsx';
 import AboutUs from './Pages/Static/AboutUs.jsx';
 import HowItWorks from './Pages/Static/HowItWorks.jsx';
 import PromotionsPage from './Pages/Marketing/PromotionsPage.jsx';
@@ -257,6 +258,7 @@ const App = () => {
         {/* <Route path='/loading' element={<LoadingPage />} /> */}
         <Route path='/results' element={<ResultsPage />} />
         <Route path='/subscription-success' element={<SubscriptionSuccess />} />
+        <Route path='/fix-it/success' element={<FixItSuccess />} />
         <Route path='/payment-cancel' element={<PaymentCancel />} />
         <Route path='/payment-failed' element={<PaymentFailed />} />
         {/* <Route path='/about-us' element={<AboutUs />} /> */}

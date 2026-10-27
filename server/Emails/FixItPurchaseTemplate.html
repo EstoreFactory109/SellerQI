@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>New Fix it purchase</title>
+  <style>
+    body, html { margin: 0; padding: 0; }
+    body { background-color: #f7fafc; font-family: Arial, sans-serif; padding: 24px 0; }
+    .container { background-color: #ffffff; max-width: 600px; margin: 0 auto; border-radius: 8px; padding: 28px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08); }
+    .title { font-size: 22px; font-weight: 700; color: #1f2937; text-align: center; margin: 0 0 16px 0; }
+    .success-box { background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 12px 16px; color: #065f46; margin-bottom: 20px; text-align: center; font-weight: 600; }
+    h3 { font-size: 14px; color: #374151; margin: 22px 0 4px 0; text-transform: uppercase; letter-spacing: .04em; }
+    table { width: 100%; border-collapse: collapse; }
+    td { border-bottom: 1px solid #e5e7eb; padding: 9px 8px; vertical-align: top; font-size: 14px; }
+    .label { width: 36%; font-weight: 600; color: #4b5563; background-color: #f9fafb; }
+    .value { color: #111827; }
+    .footer { margin-top: 20px; font-size: 12px; color: #6b7280; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <p class="title">New Fix it purchase</p>
+    <div class="success-box">{{userName}} bought the {{packageName}} package ({{tasks}} tasks) for {{amountPaid}}</div>
+
+    <h3>Contact</h3>
+    <table>
+      <tr><td class="label">Name</td><td class="value">{{userName}}</td></tr>
+      <tr><td class="label">Email</td><td class="value">{{userEmail}}</td></tr>
+      <tr><td class="label">Phone</td><td class="value">{{userPhone}}</td></tr>
+      <tr><td class="label">WhatsApp</td><td class="value">{{userWhatsapp}}</td></tr>
+    </table>
+
+    <h3>Purchase</h3>
+    <table>
+      <tr><td class="label">Package</td><td class="value">{{packageName}} — {{tasks}} tasks</td></tr>
+      <tr><td class="label">Amount paid</td><td class="value">{{amountPaid}}</td></tr>
+      <tr><td class="label">Paid at</td><td class="value">{{paidAt}}</td></tr>
+      <tr><td class="label">Open tasks when bought</td><td class="value">{{openTasks}}</td></tr>
+      <tr><td class="label">At stake (est.)</td><td class="value">{{monthlyRecoverable}}</td></tr>
+    </table>
+
+    <h3>Account</h3>
+    <table>
+      <tr><td class="label">Brand</td><td class="value">{{brand}}</td></tr>
+      <tr><td class="label">Marketplaces</td><td class="value">{{marketplaces}}</td></tr>
+      <tr><td class="label">SellerQI plan</td><td class="value">{{plan}}</td></tr>
+      <tr><td class="label">SellerQI user ID</td><td class="value">{{userId}}</td></tr>
+      <tr><td class="label">Stripe payment</td><td class="value"><a href="{{stripePaymentUrl}}">{{paymentIntentId}}</a></td></tr>
+      <tr><td class="label">Stripe customer</td><td class="value">{{customerId}}</td></tr>
+    </table>
+
+    <p class="footer">Sent by SellerQI when a Fix it package is paid for. Please reach out to the seller to get started.</p>
+  </div>
+</body>
+</html>

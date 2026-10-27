@@ -13,8 +13,10 @@ import { trackEvent } from '../../utils/analytics.js';
 
 /**
  * The "Fix it" packages: a seller buys a number of tasks for the eStore Factory
- * team to fix for them. Prices are USD and fixed here; the purchase itself is not
- * wired to a backend yet, so `onPurchase` is optional and without it the modal says so.
+ * team to fix for them. Prices are USD and shown here; the server holds the same list
+ * (server/Services/Stripe/fixItPackages.js) and decides what Stripe charges. The Tasks
+ * page passes `onPurchase` (Stripe Checkout) plus `purchasing`/`purchaseError`; without
+ * `onPurchase` the modal says buying is not available.
  *
  * Given the seller's open tasks, each package shows what its task count could
  * cover (the highest-value open tasks) and how fast that pays back the price.
@@ -57,7 +59,7 @@ const PRICE_CURRENCY = '$';
  * @param {Array} [props.openTasks] - tasks still to do, with `amount`
  * @param {string} [props.currency] - the marketplace currency symbol for task amounts
  */
-const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '$' }) => {
+const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '$', purchasing = false, purchaseError = '' }) => {
   const [selectedId, setSelectedId] = useState(null);
   const [notice, setNotice] = useState('');
 
@@ -90,7 +92,7 @@ const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '
   };
 
   const handlePurchase = () => {
-    if (!selected) return;
+    if (!selected || purchasing) return;
     trackEvent('fixit_purchase_click', { package_id: selected.id, price: selected.price });
     if (onPurchase) {
       onPurchase(selected);
@@ -222,23 +224,26 @@ const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '
               Values are your highest-value open tasks, based on the last 30 days of your data. They are estimates of what fixing could recover, not guarantees.
             </p>
           )}
-          {notice && (
-            <p role="status" className="m-0 mb-3 text-[13px]" style={{ color: COLORS.watch }}>{notice}</p>
+          {(purchaseError || notice) && (
+            <p role="status" className="m-0 mb-3 text-[13px]" style={{ color: COLORS.watch }}>{purchaseError || notice}</p>
           )}
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="m-0 text-xs" style={{ color: COLORS.textMuted }}>
               {selected
                 ? `${selected.name}: ${selected.tasks} tasks for ${formatPrice(selected.price)}`
                 : 'Select a package to continue.'}
+              {onPurchase && ' Secure payment by Stripe.'}
             </p>
             <button
               type="button"
               onClick={handlePurchase}
-              disabled={!selected}
+              disabled={!selected || purchasing}
               className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ background: COLORS.accent, color: '#061021' }}
             >
-              {selected ? `Purchase for ${formatPrice(selected.price)}` : 'Purchase'}
+              {purchasing
+                ? 'Redirecting to secure checkout…'
+                : selected ? `Purchase for ${formatPrice(selected.price)}` : 'Purchase'}
             </button>
           </div>
         </div>

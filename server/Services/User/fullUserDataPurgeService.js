@@ -148,6 +148,7 @@ const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 // Billing history — purged only for an admin's manual delete, see below.
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
+const FixItPurchase = require('../../models/system/FixItPurchaseModel.js');
 
 /** @type {{ model: import('mongoose').Model, key: string }[]} Collections with User (ObjectId) */
 const collectionsWithUser = [
@@ -303,6 +304,8 @@ const collectionsWithUserId = [
 const billingHistoryCollections = [
     { model: Subscription, key: 'userId' },
     { model: PaymentLogs, key: 'userId' },
+    // Fix it package purchases are payments too.
+    { model: FixItPurchase, key: 'userId' },
 ];
 
 /** EmailLogs uses receiverId */

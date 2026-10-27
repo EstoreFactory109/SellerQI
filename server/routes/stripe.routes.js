@@ -13,6 +13,8 @@ const {
     getSubscriptionConfig
 } = require('../controllers/payments/StripeController');
 
+const { createFixItCheckout, confirmFixItPurchase } = require('../controllers/payments/FixItController');
+
 const {
     handleWebhook,
     testWebhook
@@ -41,6 +43,10 @@ router.post('/cancel-subscription', auth, cancelSubscription);
 router.post('/reactivate-subscription', auth, reactivateSubscription);
 router.get('/payment-history', auth, getPaymentHistory);
 router.get('/invoice-download', auth, getInvoiceDownloadUrl);
+
+// "Fix it" packages (Tasks page): one-time payments, separate from the subscription above.
+router.post('/fix-it/checkout', auth, createFixItCheckout);
+router.get('/fix-it/confirm', auth, confirmFixItPurchase);
 
 // Configuration routes (no auth required for config)
 router.get('/config', getSubscriptionConfig);

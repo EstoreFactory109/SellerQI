@@ -55,6 +55,24 @@ class StripeService {
     }
 
     /**
+     * Buy a "Fix it" package: the server prices it and returns a Stripe Checkout URL, which we
+     * go to. The context (open tasks, what they are worth) is passed on to the support team.
+     */
+    async startFixItCheckout({ packageId, openTasks, monthlyRecoverable, atStakeCurrency }) {
+        const response = await axiosInstance.post('/app/stripe/fix-it/checkout', {
+            packageId, openTasks, monthlyRecoverable, atStakeCurrency,
+        });
+        window.location.href = response.data.data.url;
+        return response.data.data;
+    }
+
+    /** After Stripe sends the seller back: { status: 'paid'|'processing', purchase? }. */
+    async confirmFixItPurchase(sessionId) {
+        const response = await axiosInstance.get('/app/stripe/fix-it/confirm', { params: { session_id: sessionId } });
+        return response.data.data;
+    }
+
+    /**
      * Handle payment success
      */
     async handlePaymentSuccess(sessionId) {
