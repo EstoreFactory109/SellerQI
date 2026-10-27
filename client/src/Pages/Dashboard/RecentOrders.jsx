@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import axios from 'axios';
+import { reviewSummaryBoxes } from '../../utils/reviewSummary.js';
 import { COLORS } from '../../Components/Shared/index.js';
 import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 
@@ -158,6 +159,7 @@ const RecentOrders = () => {
 
   const [autoSendEnabled, setAutoSendEnabled] = useState(false);
   const [autoSendLoading, setAutoSendLoading] = useState(true);
+  const [summary, setSummary] = useState(null);
 
   const pageRef = useRef(0);
   const hasMoreRef = useRef(true);
@@ -205,6 +207,15 @@ const RecentOrders = () => {
       fetchNextPage();
     }
   }, [fetchNextPage]);
+
+  // The four numbers at the top (GET /api/review/summary)
+  useEffect(() => {
+    let cancelled = false;
+    axios.get(`${import.meta.env.VITE_BASE_URI}/api/review/summary`, { withCredentials: true })
+      .then((res) => { if (!cancelled && res?.data?.success) setSummary(res.data); })
+      .catch(() => { /* boxes stay as "not available" */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // Fetch auto-send toggle status
   useEffect(() => {
@@ -312,20 +323,16 @@ const RecentOrders = () => {
           </div>
         </div>
 
-        {/* KPI shell — real backend aggregation for these 4 numbers doesn't exist yet; placeholder until that work is done */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px' }}>
-          {[
-            { label: 'Eligible right now' },
-            { label: 'Requested this month' },
-            { label: 'Reviews received' },
-            { label: 'Window closed' },
-          ].map((kpi) => (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+          {reviewSummaryBoxes(summary).map((kpi) => (
             <div key={kpi.label} style={{ border: `1px solid ${COLORS.border}`, borderRadius: '12px', background: COLORS.surface, padding: '14px 16px' }}>
               <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: COLORS.textSecondary, marginBottom: '8px' }}>
                 {kpi.label}
               </div>
-              <div style={{ fontSize: '21px', fontWeight: 700, color: COLORS.textMuted }}>—</div>
-              <div style={{ fontSize: '12px', color: COLORS.textMuted, marginTop: '6px' }}>Not available yet</div>
+              <div style={{ fontSize: '21px', fontWeight: 700, color: kpi.value === null ? COLORS.textMuted : COLORS.textPrimary, fontVariantNumeric: 'tabular-nums' }}>
+                {kpi.value === null ? '—' : kpi.value.toLocaleString()}
+              </div>
+              <div style={{ fontSize: '12px', color: COLORS.textMuted, marginTop: '6px' }}>{kpi.note}</div>
             </div>
           ))}
         </div>
