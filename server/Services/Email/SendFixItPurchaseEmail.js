@@ -44,6 +44,32 @@ const planOf = (user) => {
     return user.isEsfClient ? `${plan} · ESF client` : plan;
 };
 
+const SOURCE_NOTE = {
+    created: 'new project created for this purchase',
+    matched: 'found by brand and linked to this account',
+    linked: 'already linked to this account',
+};
+
+/** What happened in Zoho Projects (FixItZohoService), as two lines for the email. */
+const zohoLines = (purchase) => {
+    const projectLine = purchase.zohoProjectName
+        ? `${purchase.zohoProjectName}${SOURCE_NOTE[purchase.zohoProjectSource] ? ` (${SOURCE_NOTE[purchase.zohoProjectSource]})` : ''}`
+        : null;
+    switch (purchase.zohoStatus) {
+        case 'done':
+            return { project: projectLine || 'N/A', task: purchase.zohoTaskName || 'Created' };
+        case 'failed':
+            return {
+                project: projectLine || 'None',
+                task: `NOT created — ${purchase.zohoError || 'unknown error'}. Please add it by hand.`,
+            };
+        case 'skipped':
+            return { project: 'Not an ESF client — no Zoho task', task: '—' };
+        default:
+            return { project: 'Not attempted', task: '—' };
+    }
+};
+
 const recipients = () => (process.env.FIXIT_PURCHASE_NOTIFY_EMAIL || DEFAULT_RECIPIENT)
     .split(',').map((e) => e.trim()).filter(Boolean);
 
@@ -96,13 +122,18 @@ const sendFixItPurchaseEmail = async (purchase) => {
         paymentIntentId: purchase.stripePaymentIntentId || 'N/A',
         stripePaymentUrl: purchase.stripePaymentIntentId ? `https://dashboard.stripe.com/payments/${purchase.stripePaymentIntentId}` : 'https://dashboard.stripe.com/payments',
         customerId: purchase.stripeCustomerId || 'N/A',
+        zohoProject: zohoLines(purchase).project,
+        zohoTask: zohoLines(purchase).task,
     };
 
     const html = Object.entries(fields).reduce(
         (out, [key, value]) => out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), escapeHtml(value)),
         templateHtml
     );
-    const subject = `Fix it purchase: ${purchase.packageName} (${amountPaid}) — ${userName}`;
+    const newProject = purchase.zohoProjectSource === 'created' && purchase.zohoProjectName
+        ? ` — new Zoho project "${purchase.zohoProjectName}"`
+        : '';
+    const subject = `Fix it purchase: ${purchase.packageName} (${amountPaid}) — ${userName}${newProject}`;
     const text = [
         `${userName} bought the Fix it ${purchase.packageName} package (${purchase.tasks} tasks) for ${amountPaid}.`,
         '',
@@ -112,6 +143,8 @@ const sendFixItPurchaseEmail = async (purchase) => {
         `Brand: ${brand} (${marketplaces})`,
         `Plan: ${fields.plan}`,
         `Open tasks when bought: ${fields.openTasks}`,
+        `Zoho project: ${fields.zohoProject}`,
+        `Zoho task: ${fields.zohoTask}`,
         `Stripe payment: ${fields.stripePaymentUrl}`,
         `SellerQI user ID: ${fields.userId}`,
     ].join('\n');

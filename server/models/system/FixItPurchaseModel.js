@@ -29,6 +29,16 @@ const fixItPurchaseSchema = new mongoose.Schema(
         atStakeCurrency: { type: String, default: null, maxlength: 5 }, // symbol of the marketplace currency, e.g. 'A$'
         // Set when the support email has gone out (claimed atomically so it is sent once).
         supportNotifiedAt: { type: Date, default: null },
+        // ESF clients: the Zoho task for this purchase (FixItZohoService). Claimed atomically
+        // ('running') so the webhook and the success page never create it twice.
+        zohoStatus: { type: String, enum: [null, 'running', 'done', 'skipped', 'failed'], default: null },
+        zohoClaimedAt: { type: Date, default: null },
+        zohoError: { type: String, default: null },
+        zohoProjectId: { type: String, default: null },
+        zohoProjectName: { type: String, default: null },
+        zohoProjectSource: { type: String, enum: [null, 'linked', 'matched', 'created'], default: null },
+        zohoTaskId: { type: String, default: null },
+        zohoTaskName: { type: String, default: null },
     },
     { timestamps: true }
 );

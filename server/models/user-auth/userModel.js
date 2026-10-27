@@ -175,7 +175,9 @@ const userSchema = new mongoose.Schema(
       },
       // The Zoho project this client's work is tracked in. Projects are created
       // in Zoho, never here — the portal only ever LINKS an existing one, so
-      // these fields mirror a Zoho project rather than owning it. A plain nested
+      // these fields mirror a Zoho project rather than owning it (the one exception:
+      // a Fix it purchase by an unlinked client, Services/Stripe/FixItZohoService.js,
+      // creates one named after their brand). A plain nested
       // path (not a sub-schema) so no stray _id is added.
       // See Services/Zoho/ZohoProjectLinks.js.
       zohoProject: {

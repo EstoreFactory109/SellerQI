@@ -4,6 +4,8 @@
  * Projects are created in Zoho, never here. The portal's only job is to record
  * which Zoho project tracks a given client's work, so this service is about
  * *finding* the right project and storing the pointer — never about creating one.
+ * (One exception lives elsewhere: an ESF client with no project who buys a Fix it
+ * package gets one made for their brand — Services/Stripe/FixItZohoService.js.)
  *
  * The link itself lives on the client's User document (`zohoProject`), not in a
  * join collection: it is one pointer per client, read on every clients-list

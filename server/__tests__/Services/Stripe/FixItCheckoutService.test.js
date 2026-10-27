@@ -10,6 +10,7 @@
  */
 jest.mock('../../../Services/Stripe/StripeService.js', () => ({ stripe: {}, createOrGetCustomer: jest.fn() }));
 jest.mock('../../../Services/Email/SendFixItPurchaseEmail.js', () => ({ sendFixItPurchaseEmail: jest.fn() }));
+jest.mock('../../../Services/Stripe/FixItZohoService.js', () => ({ addFixItTaskToZoho: jest.fn() }));
 jest.mock('../../../models/user-auth/userModel.js', () => ({ findById: jest.fn() }));
 jest.mock('../../../models/user-auth/SubscriptionModel.js', () => ({ exists: jest.fn() }));
 jest.mock('../../../models/system/PaymentLogsModel.js', () => ({ logEvent: jest.fn(), logWebhookEvent: jest.fn() }));
@@ -17,6 +18,8 @@ jest.mock('../../../models/system/FixItPurchaseModel.js', () => {
   // A tiny in-memory stand-in for the few queries the service makes.
   const rows = [];
   const matches = (row, filter) => Object.entries(filter).every(([k, v]) => {
+    if (k === '$or') return v.some((f) => matches(row, f));
+    if (v && typeof v === 'object' && '$lt' in v) return row[k] != null && row[k] < v.$lt;
     if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(row[k]);
     if (v && typeof v === 'object' && '$ne' in v) return row[k] !== v.$ne;
     return String(row[k]) === String(v) || (v === null && row[k] == null);
@@ -27,7 +30,7 @@ jest.mock('../../../models/system/FixItPurchaseModel.js', () => {
     _rows: rows,
     create: async (doc) => { const row = { _id: `p${rows.length + 1}`, status: 'pending', supportNotifiedAt: null, paidAt: null, ...doc }; rows.push(row); return wrap(row); },
     findOne: (filter) => query(rows.filter((r) => matches(r, filter)).slice(-1)[0] || null),
-    findById: async (id) => wrap(rows.find((r) => r._id === id)),
+    findById: (id) => query(rows.find((r) => r._id === id) || null),
     updateOne: async (filter, update) => { const row = rows.find((r) => matches(r, filter)); if (row) Object.assign(row, update.$set); return {}; },
     findOneAndUpdate: (filter, update, opts = {}) => {
       let row = rows.find((r) => matches(r, filter));
@@ -44,6 +47,7 @@ const User = require('../../../models/user-auth/userModel.js');
 const Subscription = require('../../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../../models/system/PaymentLogsModel.js');
 const { sendFixItPurchaseEmail } = require('../../../Services/Email/SendFixItPurchaseEmail.js');
+const { addFixItTaskToZoho } = require('../../../Services/Stripe/FixItZohoService.js');
 const svc = require('../../../Services/Stripe/FixItCheckoutService.js');
 
 const USER = '64b000000000000000000001';
@@ -72,9 +76,13 @@ beforeEach(() => {
   User.findById.mockReturnValue({ select: () => ({ lean: async () => ({ _id: USER, firstName: 'Ann', lastName: 'Lee', email: 'ann@acme.com' }) }) });
   Subscription.exists.mockResolvedValue(null);
   sendFixItPurchaseEmail.mockResolvedValue('msg-1');
+  addFixItTaskToZoho.mockResolvedValue({ status: 'skipped' });
   PaymentLogs.logEvent.mockResolvedValue({});
   PaymentLogs.logWebhookEvent.mockResolvedValue({ isNew: true });
 });
+
+// Background after-payment work must never leak into the next test.
+afterEach(() => svc.drainBackground());
 
 describe('starting checkout', () => {
   it('opens a one-time payment for the server\'s price, tagged for the webhook', async () => {
@@ -122,6 +130,7 @@ describe('completing the purchase', () => {
   it('webhook and success page together: one paid purchase, one email', async () => {
     await svc.completeFixItPurchase(paidSession(), { source: 'WEBHOOK', webhookEventId: 'evt_1' });
     await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
     expect(FixItPurchase._rows).toHaveLength(1);
     expect(FixItPurchase._rows[0]).toMatchObject({ status: 'paid', amount: 299, stripePaymentIntentId: 'pi_1' });
     expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(1);
@@ -131,8 +140,10 @@ describe('completing the purchase', () => {
   it('a failed email is retried by the next path', async () => {
     sendFixItPurchaseEmail.mockResolvedValueOnce(false);
     await svc.completeFixItPurchase(paidSession(), { source: 'WEBHOOK', webhookEventId: 'evt_1' });
+    await svc.drainBackground();
     expect(FixItPurchase._rows[0].supportNotifiedAt).toBeNull();
     await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
     expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(2);
     expect(FixItPurchase._rows[0].supportNotifiedAt).toBeInstanceOf(Date);
   });
@@ -146,6 +157,50 @@ describe('completing the purchase', () => {
     expect(await svc.completeFixItPurchase(paidSession({ payment_status: 'unpaid' }))).toBeNull();
     expect(FixItPurchase._rows[0].status).toBe('pending');
     expect(sendFixItPurchaseEmail).not.toHaveBeenCalled();
+  });
+
+  it('an ESF client\'s purchase: the Zoho task is made once, before the email, which carries it', async () => {
+    addFixItTaskToZoho.mockResolvedValue({ status: 'done', projectId: 'P9', projectName: 'Acme Goods', projectSource: 'created', taskId: 'T1', taskName: 'Fix it – Standard package' });
+    await svc.completeFixItPurchase(paidSession(), { source: 'WEBHOOK', webhookEventId: 'evt_1' });
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(addFixItTaskToZoho).toHaveBeenCalledTimes(1);
+    expect(FixItPurchase._rows[0]).toMatchObject({ zohoStatus: 'done', zohoProjectName: 'Acme Goods', zohoProjectSource: 'created', zohoTaskId: 'T1' });
+    expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(1);
+    expect(sendFixItPurchaseEmail.mock.calls[0][0]).toMatchObject({ zohoStatus: 'done', zohoProjectName: 'Acme Goods' });
+  });
+
+  it('a Zoho failure still emails support, with the reason', async () => {
+    addFixItTaskToZoho.mockResolvedValue({ status: 'failed', error: 'Zoho Projects is not connected' });
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(sendFixItPurchaseEmail.mock.calls[0][0]).toMatchObject({ zohoStatus: 'failed', zohoError: 'Zoho Projects is not connected' });
+  });
+
+  it('a crash in the Zoho step is recorded as failed and the email still goes', async () => {
+    addFixItTaskToZoho.mockRejectedValue(new Error('boom'));
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(FixItPurchase._rows[0]).toMatchObject({ zohoStatus: 'failed', zohoError: 'boom' });
+    expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('while another path holds a fresh Zoho claim, nothing is done twice and the email waits for it', async () => {
+    FixItPurchase._rows[0].zohoStatus = 'running';
+    FixItPurchase._rows[0].zohoClaimedAt = new Date();
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(addFixItTaskToZoho).not.toHaveBeenCalled();
+    expect(sendFixItPurchaseEmail).not.toHaveBeenCalled();
+  });
+
+  it('a claim abandoned 10+ minutes ago (crash, deploy) is taken over', async () => {
+    FixItPurchase._rows[0].zohoStatus = 'running';
+    FixItPurchase._rows[0].zohoClaimedAt = new Date(Date.now() - 11 * 60 * 1000);
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(addFixItTaskToZoho).toHaveBeenCalledTimes(1);
+    expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(1);
   });
 
   it('ignores sessions that are not Fix it purchases', async () => {
@@ -177,6 +232,7 @@ describe('refunds and abandoned checkouts', () => {
   beforeEach(async () => {
     await svc.createFixItCheckout(USER, { packageId: 'standard' });
     await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
   });
 
   it('a full refund marks the purchase and is reported as handled', async () => {

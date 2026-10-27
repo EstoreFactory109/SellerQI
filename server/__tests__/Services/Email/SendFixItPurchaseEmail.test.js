@@ -71,3 +71,31 @@ it('returns false instead of throwing when sending fails', async () => {
   mockSendMail.mockRejectedValue(new Error('SES down'));
   expect(await sendFixItPurchaseEmail(purchase)).toBe(false);
 });
+
+describe('the Zoho section', () => {
+  it('names a newly created project, in the subject too', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'done', zohoProjectName: 'Acme Goods', zohoProjectSource: 'created', zohoTaskName: 'Fix it – Standard package: fix 30 tasks (paid $299)' });
+    const mail = mockSendMail.mock.calls[0][0];
+    expect(mail.subject).toBe('Fix it purchase: Standard ($299) — Ann <b>Lee</b> — new Zoho project "Acme Goods"');
+    expect(mail.html).toContain('Acme Goods (new project created for this purchase)');
+    expect(mail.text).toContain('Zoho project: Acme Goods (new project created for this purchase)');
+    expect(mail.text).toContain('Zoho task: Fix it – Standard package');
+  });
+
+  it('says how an existing project was found', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'done', zohoProjectName: 'ACME | Seller Central', zohoProjectSource: 'matched', zohoTaskName: 't' });
+    const mail = mockSendMail.mock.calls[0][0];
+    expect(mail.text).toContain('ACME | Seller Central (found by brand and linked to this account)');
+    expect(mail.subject).not.toContain('new Zoho project');
+  });
+
+  it('asks the team to add the task by hand when Zoho failed', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'failed', zohoError: 'Zoho Projects is not connected' });
+    expect(mockSendMail.mock.calls[0][0].text).toContain('Zoho task: NOT created — Zoho Projects is not connected. Please add it by hand.');
+  });
+
+  it('says there is no Zoho task for a seller who is not an ESF client', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'skipped' });
+    expect(mockSendMail.mock.calls[0][0].text).toContain('Zoho project: Not an ESF client — no Zoho task');
+  });
+});

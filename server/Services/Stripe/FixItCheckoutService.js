@@ -6,6 +6,8 @@
  *   finish  — completeFixItPurchase: called by BOTH the webhook (checkout.session.completed) and
  *             the success page (/fix-it/confirm). Either may arrive first or alone, so it is
  *             idempotent, and the support email is claimed atomically so it goes out once.
+ *   then    — runAfterPayment (background): an ESF client's purchase becomes a task in their
+ *             Zoho project (FixItZohoService), then support is emailed with the outcome.
  *   refund  — handleFixItRefund: a refunded package charge marks the purchase, and must never
  *             reach the subscription refund logic (same Stripe customer for PRO sellers).
  */
@@ -16,6 +18,7 @@ const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 const { getFixItPackage, productName } = require('./fixItPackages.js');
 const { sendFixItPurchaseEmail } = require('../Email/SendFixItPurchaseEmail.js');
+const { addFixItTaskToZoho } = require('./FixItZohoService.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const logger = require('../../utils/Logger.js');
 
@@ -142,6 +145,63 @@ const notifySupportOnce = async (purchase) => {
     return true;
 };
 
+/** A 'running' Zoho claim this old was abandoned (a crash or a deploy mid-way) and is taken over. */
+const ZOHO_CLAIM_STALE_MS = 10 * 60 * 1000;
+
+/** The Zoho task for an ESF client's purchase — once, however many paths arrive. */
+const runZohoOnce = async (purchaseId) => {
+    const now = new Date();
+    const claimed = await FixItPurchase.findOneAndUpdate(
+        { _id: purchaseId, $or: [
+            { zohoStatus: null },
+            { zohoStatus: 'running', zohoClaimedAt: { $lt: new Date(now.getTime() - ZOHO_CLAIM_STALE_MS) } },
+        ] },
+        { $set: { zohoStatus: 'running', zohoClaimedAt: now } },
+        { new: true }
+    ).lean();
+    if (!claimed) return;
+    const outcome = await addFixItTaskToZoho(claimed);
+    await FixItPurchase.updateOne({ _id: purchaseId }, { $set: {
+        zohoStatus: outcome.status,
+        zohoError: outcome.error || null,
+        zohoProjectId: outcome.projectId || null,
+        zohoProjectName: outcome.projectName || null,
+        zohoProjectSource: outcome.projectSource || null,
+        zohoTaskId: outcome.taskId || null,
+        zohoTaskName: outcome.taskName || null,
+    } });
+};
+
+/**
+ * After payment: the Zoho task (ESF clients), then the support email — which reports what
+ * happened in Zoho, so it waits for that step. Runs in the background so neither the webhook
+ * (Stripe wants a quick answer) nor the success page waits on Zoho and the AI.
+ */
+const runAfterPayment = async (purchaseId) => {
+    try {
+        await runZohoOnce(purchaseId);
+    } catch (error) {
+        logger.error(`[FixIt] Zoho step for ${purchaseId} crashed: ${error.message}`);
+        await FixItPurchase.updateOne({ _id: purchaseId, zohoStatus: 'running' }, { $set: { zohoStatus: 'failed', zohoError: String(error.message).slice(0, 300) } }).catch(() => {});
+    }
+    const current = await FixItPurchase.findById(purchaseId).lean();
+    // Another path holds the Zoho claim right now; it sends the email when it is done.
+    if (!current || current.zohoStatus === 'running') return;
+    await notifySupportOnce(current);
+};
+
+/** In-flight background runs, so tests (and a graceful shutdown) can wait for them. */
+const inFlight = new Set();
+const runInBackground = (purchaseId) => {
+    const run = new Promise((resolve) => setImmediate(resolve))
+        .then(() => runAfterPayment(purchaseId))
+        .catch((error) => logger.error(`[FixIt] after-payment work for ${purchaseId} failed: ${error.message}`))
+        .finally(() => inFlight.delete(run));
+    inFlight.add(run);
+    return run;
+};
+const drainBackground = () => Promise.all([...inFlight]);
+
 /**
  * Record a paid Checkout session and tell support. Safe to call any number of times.
  * @param {object} session  a Stripe Checkout Session with metadata.purchaseType === 'fixit'
@@ -209,7 +269,7 @@ const completeFixItPurchase = async (session, { source = 'API', webhookEventId =
     }
     if (transitioned) logger.info(`[FixIt] purchase ${current._id} paid (${source}): ${current.packageId} for ${current.userId}`);
 
-    await notifySupportOnce(current);
+    runInBackground(current._id);
     return current.toObject();
 };
 
@@ -290,5 +350,7 @@ module.exports = {
     confirmFixItPurchase,
     expireFixItCheckout,
     handleFixItRefund,
+    runAfterPayment,
+    drainBackground,
     _priceCache: priceCache,
 };
