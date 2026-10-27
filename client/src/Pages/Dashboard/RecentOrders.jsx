@@ -288,7 +288,7 @@ const RecentOrders = () => {
     setExpandedOrderId((prev) => (prev === orderId ? null : orderId));
   };
 
-  const COL_COUNT = 7;
+  const COL_COUNT = 8;
 
   return (
     <div className="min-h-screen w-full" style={{ background: COLORS.bgBase, color: COLORS.textPrimary }}>
@@ -352,6 +352,7 @@ const RecentOrders = () => {
                   <th className="px-4 py-3 text-right font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted, fontSize: '11px', borderBottom: `1px solid ${COLORS.border}` }}>Total</th>
                   <th className="px-4 py-3 text-center font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted, fontSize: '11px', borderBottom: `1px solid ${COLORS.border}` }}>Can Request Review</th>
                   <th className="px-4 py-3 text-center font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted, fontSize: '11px', borderBottom: `1px solid ${COLORS.border}` }}>Review Status</th>
+                  <th className="px-4 py-3 text-left font-semibold uppercase tracking-wide" style={{ color: COLORS.textMuted, fontSize: '11px', borderBottom: `1px solid ${COLORS.border}` }}>Reason</th>
                 </tr>
               </thead>
               <tbody>
@@ -393,6 +394,9 @@ const RecentOrders = () => {
                         </td>
                         <td className="px-4 py-3.5 text-sm text-center" style={{ color: COLORS.textSecondary }}>
                           {statusConfig.label}
+                        </td>
+                        <td className="px-4 py-3.5 text-xs" style={{ color: COLORS.textSecondary, minWidth: '220px', maxWidth: '320px' }}>
+                          {order.notEligibleReason || (order.canRequestReview ? 'Ready to send' : '—')}
                         </td>
                       </tr>
                       {isExpanded && (

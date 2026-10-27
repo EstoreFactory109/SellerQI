@@ -9,6 +9,46 @@ const WINDOW_CLOSED_AFTER_DAYS = 35;
 // Eligibility goes stale as the window moves; only a recent check counts as "now".
 const ELIGIBILITY_FRESH_DAYS = 3;
 
+// The window the sender works in (Services/review/orders.js), by order age.
+const { ORDER_CONFIG } = require("../../Services/review/orders.js");
+
+/**
+ * Pure: why a review request can't be sent for this order, in the seller's words, or
+ * null when it can. Amazon gives a reason only for some orders (as an error on the
+ * eligibility check); otherwise the reason comes from what SellerQI knows: the order's
+ * age, whether it was checked with Amazon, and whether auto-send is on (eligibility is
+ * only checked for accounts with auto-send on, for orders 5-30 days old).
+ * @param {Object} order - ReviewOrder fields
+ * @param {{now?: Date, autoSend?: boolean}} [ctx]
+ * @returns {string|null}
+ */
+function reviewIneligibleReason(order, { now = new Date(), autoSend = false } = {}) {
+  if (!order) return null;
+  if (order.reviewRequestStatus === "sent") {
+    const at = order.reviewRequestLastSentAt ? new Date(order.reviewRequestLastSentAt) : null;
+    return at ? `Already requested on ${at.toISOString().slice(0, 10)}` : "Already requested";
+  }
+  if (order.reviewRequestStatus === "failed") {
+    return `Sending failed${order.reviewRequestError ? `: ${String(order.reviewRequestError).slice(0, 140)}` : ""}`;
+  }
+  if (order.canRequestReview === true) return null;
+
+  const error = String(order.eligibilityResponse?.errors?.[0]?.message || "");
+  if (/multi-channel/i.test(error)) return "Multi-channel order: Amazon doesn't allow review requests";
+  if (/denied|unauthori[sz]ed/i.test(error)) return "Amazon refused access for this account";
+  if (error) return `Amazon said: ${error.slice(0, 140)}`;
+
+  const ageDays = order.purchaseDate ? (now.getTime() - new Date(order.purchaseDate).getTime()) / DAY_MS : null;
+  if (ageDays !== null && ageDays < ORDER_CONFIG.minOrderAgeDays) return "Too early: requests open 5 days after delivery";
+  if (ageDays !== null && ageDays > ORDER_CONFIG.maxOrderAgeDays) return "Past the 30-day request window";
+  if (order.eligibilityLastCheckedAt) {
+    return "Amazon allows no request for this order right now (already requested in Seller Central, or not delivered yet)";
+  }
+  return autoSend
+    ? "Waiting for SellerQI's next check with Amazon"
+    : "Not checked with Amazon: turn on Auto review requests";
+}
+
 /**
  * Pure: new ratings between two weekly snapshots.
  * - Variations share one rating count, so each (before, after) pair counts once
@@ -69,9 +109,12 @@ const getRecentOrders = async (req, res) => {
       isArchived: false,
     };
 
-    const [orders, total] = await Promise.all([
+    const [rawOrders, total, owner] = await Promise.all([
+      // Order date only: the { User, country, region, purchaseDate } index serves it.
+      // A createdAt tie-breaker forced an in-memory sort of every order (14 s on a
+      // 615k-order account; 52 ms without it).
       ReviewOrder.find(filter)
-        .sort({ purchaseDate: -1, createdAt: -1 })
+        .sort({ purchaseDate: -1 })
         .skip(skip)
         .limit(limit)
         .select({
@@ -84,10 +127,26 @@ const getRecentOrders = async (req, res) => {
           canRequestReview: 1,
           reviewRequestStatus: 1,
           reviewRequestLastSentAt: 1,
+          reviewRequestError: 1,
+          eligibilityLastCheckedAt: 1,
+          "eligibilityResponse.errors": 1,
         })
         .lean(),
       ReviewOrder.countDocuments(filter),
+      User.findById(userId).select({ reviewRequestAuthStatus: 1 }).lean(),
     ]);
+
+    // Each order carries why it can't be sent (null when it can); the raw Amazon
+    // answer stays on the server.
+    const now = new Date();
+    const autoSend = !!owner?.reviewRequestAuthStatus;
+    const orders = rawOrders.map(({ eligibilityResponse, eligibilityLastCheckedAt, reviewRequestError, ...o }) => ({
+      ...o,
+      notEligibleReason: reviewIneligibleReason(
+        { ...o, eligibilityResponse, eligibilityLastCheckedAt, reviewRequestError },
+        { now, autoSend }
+      ),
+    }));
 
     const totalPages = Math.ceil(total / limit) || 1;
 
@@ -358,6 +417,7 @@ const getReviewSummary = async (req, res) => {
 
 module.exports = {
   getReviewSummary,
+  reviewIneligibleReason,
   newRatingsBetween,
   getRecentOrders,
   getOrderItems,
