@@ -151,3 +151,12 @@ describe('projections', () => {
     expect(lossOverSeconds(2592, -5)).toBe(0);
   });
 });
+
+describe('accountRiskLabel', () => {
+  it('names an unstable metric like its sustained one, marked unstable', async () => {
+    const { accountRiskLabel } = await import('../../utils/taskUrgency.js');
+    expect(accountRiskLabel('orderWithDefectsStatus')).toBe('Order Defect Rate');
+    expect(accountRiskLabel('orderWithDefectsStatus_unstable')).toBe('Order Defect Rate (unstable)');
+    expect(accountRiskLabel('somethingNew')).toBe('somethingNew');
+  });
+});

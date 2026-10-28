@@ -109,7 +109,13 @@ const TaskItemSchema = new mongoose.Schema({
     reopenedAt: { type: Date },
     reopenCount: { type: Number, default: 0 },
     // Reopened because the seller marked it done but the data still shows it.
-    stillDetected: { type: Boolean, default: false }
+    stillDetected: { type: Boolean, default: false },
+    // Why it was last reopened: 'reappeared' | 'still_detected' | 'escalated' (got worse).
+    reopenReason: { type: String },
+    // Which problem this is (Services/Calculations/TaskIdentity.js). Stays the same while
+    // the problem's label (errorType) moves with its state, so the row and the seller's
+    // status survive e.g. low stock -> out of stock.
+    identityKey: { type: String }
 }, {
     timestamps: true
 });
@@ -128,6 +134,18 @@ TaskItemSchema.index(
 );
 
 // Primary read path: one marketplace's tasks.
+/*
+ * One row per problem per marketplace. Partial: rows written before identities existed
+ * have none until scripts/migrateTaskIdentity.js backfills them, and must not collide.
+ * task_dedup_marketplace (above) is dropped by that script (--drop-old-index) once every
+ * row has an identity: it would otherwise refuse a row whose label moved onto a label
+ * another (merged-away) row still holds.
+ */
+TaskItemSchema.index(
+    { userId: 1, country: 1, region: 1, identityKey: 1 },
+    { unique: true, name: 'task_identity_marketplace', partialFilterExpression: { identityKey: { $type: 'string' } } }
+);
+
 TaskItemSchema.index({ userId: 1, country: 1, region: 1 });
 
 // Index for status queries
@@ -250,6 +268,7 @@ TaskItemSchema.statics.bulkInsertTasks = async function(userId, tasks, chunkSize
             country: task.country || country,
             region: task.region || region,
             taskId: task.taskId,
+            identityKey: task.identityKey,
             productName: task.productName,
             asin: task.asin,
             errorCategory: task.errorCategory,

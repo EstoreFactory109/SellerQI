@@ -39,6 +39,16 @@ export const ACCOUNT_RISK_LABELS = {
   ahr_early_warning: 'Falling Account Health Rating',
 };
 
+// A metric Amazon keeps flipping is stored as '<key>_unstable' (same task, lower
+// priority): same name, marked as such, never the raw key.
+export const accountRiskLabel = (errorType) => {
+  const type = String(errorType || '');
+  const base = type.endsWith('_unstable') ? type.slice(0, -'_unstable'.length) : type;
+  const label = ACCOUNT_RISK_LABELS[base];
+  if (!label) return type;
+  return base === type ? label : `${label} (unstable)`;
+};
+
 const money = (n) => (Number.isFinite(Number(n)) ? Number(n) : 0);
 const cents = (n) => Math.round(n * 100) / 100;
 
@@ -80,7 +90,7 @@ export function summarizeUrgency(openTasks = [], serverGroups = []) {
       risks.push({
         taskId: t.taskId,
         errorType: t.errorType,
-        label: ACCOUNT_RISK_LABELS[t.errorType] || t.errorType,
+        label: accountRiskLabel(t.errorType),
         impactWeight: money(t.impactWeight),
       });
     }
