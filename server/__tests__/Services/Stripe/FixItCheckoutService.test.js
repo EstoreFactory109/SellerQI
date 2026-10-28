@@ -2,8 +2,9 @@
  * Buying a "Fix it" package through Stripe Checkout.
  *
  * Pinned: the server picks the price (the client only names a package) and refuses a Stripe
- * price that does not match; the session is a one-time payment that carries purchaseType for
- * the webhook; the subscription is never touched; completing from the webhook AND the success
+ * price that does not match; the Trial is a one-time payment and Standard/Accelerated are monthly
+ * subscriptions, both carrying purchaseType for the webhooks; a second live Fix it subscription
+ * is refused; the SellerQI-plan Subscription is never touched; completing from the webhook AND the success
  * page records one purchase and sends the support email once, retrying if the email failed;
  * the success page only confirms the caller's own paid session; a refund of a package is
  * handled here and never reaches the subscription.
@@ -14,6 +15,8 @@ jest.mock('../../../Services/Stripe/FixItZohoService.js', () => ({ addFixItTaskT
 jest.mock('../../../models/user-auth/userModel.js', () => ({ findById: jest.fn() }));
 jest.mock('../../../models/user-auth/SubscriptionModel.js', () => ({ exists: jest.fn() }));
 jest.mock('../../../models/system/PaymentLogsModel.js', () => ({ logEvent: jest.fn(), logWebhookEvent: jest.fn() }));
+jest.mock('../../../models/system/FixItSubscriptionModel.js', () => ({ findOne: jest.fn(), LIVE_STATUSES: ['active', 'trialing', 'past_due', 'unpaid'] }));
+jest.mock('../../../Services/Stripe/FixItSubscriptionService.js', () => ({ syncFromStripe: jest.fn(), paymentIntentOfInvoice: jest.fn() }));
 jest.mock('../../../models/system/FixItPurchaseModel.js', () => {
   // A tiny in-memory stand-in for the few queries the service makes.
   const rows = [];
@@ -48,15 +51,19 @@ const Subscription = require('../../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../../models/system/PaymentLogsModel.js');
 const { sendFixItPurchaseEmail } = require('../../../Services/Email/SendFixItPurchaseEmail.js');
 const { addFixItTaskToZoho } = require('../../../Services/Stripe/FixItZohoService.js');
+const FixItSubscription = require('../../../models/system/FixItSubscriptionModel.js');
+const FixItSubscriptionService = require('../../../Services/Stripe/FixItSubscriptionService.js');
 const svc = require('../../../Services/Stripe/FixItCheckoutService.js');
 
 const USER = '64b000000000000000000001';
 const price = (overrides = {}) => ({ id: 'price_std', unit_amount: 29900, currency: 'usd', type: 'one_time', active: true, ...overrides });
+const monthly = { type: 'recurring', recurring: { interval: 'month', interval_count: 1 } };
 const PRICES = {
   sqi_fixit_trial: price({ id: 'price_trial', unit_amount: 2500 }),
-  sqi_fixit_standard: price(),
-  sqi_fixit_accelerated: price({ id: 'price_acc', unit_amount: 49900 }),
+  sqi_fixit_standard_monthly: price(monthly),
+  sqi_fixit_accelerated_monthly: price({ id: 'price_acc', unit_amount: 49900, ...monthly }),
 };
+const chain = (value) => ({ select: () => ({ lean: async () => value }) });
 const paidSession = (overrides = {}) => ({
   id: 'cs_test_1', payment_status: 'paid', payment_intent: 'pi_1', customer: 'cus_1', amount_total: 29900, currency: 'usd',
   metadata: { userId: USER, purchaseType: 'fixit', packageId: 'standard' }, ...overrides,
@@ -75,6 +82,9 @@ beforeEach(() => {
   StripeService.createOrGetCustomer.mockResolvedValue({ id: 'cus_1' });
   User.findById.mockReturnValue({ select: () => ({ lean: async () => ({ _id: USER, firstName: 'Ann', lastName: 'Lee', email: 'ann@acme.com' }) }) });
   Subscription.exists.mockResolvedValue(null);
+  FixItSubscription.findOne.mockReturnValue(chain(null));
+  FixItSubscriptionService.syncFromStripe.mockResolvedValue({});
+  FixItSubscriptionService.paymentIntentOfInvoice.mockResolvedValue('pi_inv');
   sendFixItPurchaseEmail.mockResolvedValue('msg-1');
   addFixItTaskToZoho.mockResolvedValue({ status: 'skipped' });
   PaymentLogs.logEvent.mockResolvedValue({});
@@ -85,21 +95,48 @@ beforeEach(() => {
 afterEach(() => svc.drainBackground());
 
 describe('starting checkout', () => {
-  it('opens a one-time payment for the server\'s price, tagged for the webhook', async () => {
+  it('Standard: a monthly subscription for the server\'s price, tagged for every webhook', async () => {
     const out = await svc.createFixItCheckout(USER, { packageId: 'standard', openTasks: 9, monthlyRecoverable: 1007.03, atStakeCurrency: 'A$' });
     expect(out.url).toBe('https://checkout.stripe.com/c/pay/cs_test_1');
-    expect(StripeService.stripe.prices.list).toHaveBeenCalledWith({ lookup_keys: ['sqi_fixit_standard'], active: true, limit: 1 });
+    expect(StripeService.stripe.prices.list).toHaveBeenCalledWith({ lookup_keys: ['sqi_fixit_standard_monthly'], active: true, limit: 1 });
     const params = StripeService.stripe.checkout.sessions.create.mock.calls[0][0];
+    const metadata = { userId: USER, purchaseType: 'fixit', packageId: 'standard' };
     expect(params).toMatchObject({
-      mode: 'payment',
+      mode: 'subscription',
       customer: 'cus_1',
       line_items: [{ price: 'price_std', quantity: 1 }],
-      metadata: { userId: USER, purchaseType: 'fixit', packageId: 'standard' },
-      payment_intent_data: { metadata: { userId: USER, purchaseType: 'fixit', packageId: 'standard' }, receipt_email: 'ann@acme.com' },
+      metadata,
+      subscription_data: { metadata },
       success_url: 'https://members.sellerqi.com/fix-it/success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://members.sellerqi.com/seller-central-checker/tasks?fixit=cancelled',
     });
-    expect(FixItPurchase._rows[0]).toMatchObject({ packageId: 'standard', tasks: 30, amount: 299, status: 'pending', stripeSessionId: 'cs_test_1', openTasks: 9, atStakeCurrency: 'A$' });
+    expect(params).not.toHaveProperty('payment_intent_data'); // not allowed in subscription mode
+    expect(FixItPurchase._rows[0]).toMatchObject({ packageId: 'standard', tasks: 30, amount: 299, status: 'pending', billing: 'monthly', period: 1, stripeSessionId: 'cs_test_1', openTasks: 9, atStakeCurrency: 'A$' });
+  });
+
+  it('Trial: a one-time payment with a receipt', async () => {
+    await svc.createFixItCheckout(USER, { packageId: 'trial' });
+    const params = StripeService.stripe.checkout.sessions.create.mock.calls[0][0];
+    expect(params).toMatchObject({
+      mode: 'payment',
+      line_items: [{ price: 'price_trial', quantity: 1 }],
+      payment_intent_data: { metadata: { userId: USER, purchaseType: 'fixit', packageId: 'trial' }, receipt_email: 'ann@acme.com' },
+    });
+    expect(params).not.toHaveProperty('subscription_data');
+    expect(FixItPurchase._rows[0]).toMatchObject({ billing: 'one_time', period: null });
+  });
+
+  it('refuses a second Fix it subscription, but still sells the Trial', async () => {
+    FixItSubscription.findOne.mockReturnValue(chain({ packageName: 'Standard' }));
+    await expect(svc.createFixItCheckout(USER, { packageId: 'accelerated' })).rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('Standard') });
+    expect(FixItSubscription.findOne.mock.calls[0][0]).toEqual({ userId: USER, status: { $in: ['active', 'trialing', 'past_due', 'unpaid'] } });
+    await svc.createFixItCheckout(USER, { packageId: 'trial' });
+    expect(StripeService.stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a monthly package whose Stripe price is one-time', async () => {
+    StripeService.stripe.prices.list.mockResolvedValueOnce({ data: [price()] });
+    await expect(svc.createFixItCheckout(USER, { packageId: 'standard' })).rejects.toMatchObject({ statusCode: 503 });
   });
 
   it('refuses an unknown package without calling Stripe', async () => {
@@ -146,6 +183,13 @@ describe('completing the purchase', () => {
     await svc.drainBackground();
     expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(2);
     expect(FixItPurchase._rows[0].supportNotifiedAt).toBeInstanceOf(Date);
+  });
+
+  it('a subscription\'s first payment is month 1, linked to its subscription and invoice', async () => {
+    const out = await svc.completeFixItPurchase(paidSession({ payment_intent: null, subscription: 'sub_1', invoice: 'in_1' }), { source: 'API' });
+    expect(out).toMatchObject({ status: 'paid', billing: 'monthly', period: 1, stripeSubscriptionId: 'sub_1', stripeInvoiceId: 'in_1', stripePaymentIntentId: 'pi_inv' });
+    expect(FixItSubscriptionService.paymentIntentOfInvoice).toHaveBeenCalledWith('in_1');
+    expect(FixItSubscriptionService.syncFromStripe).toHaveBeenCalledWith('sub_1');
   });
 
   it('records what was really paid after a promo code', async () => {

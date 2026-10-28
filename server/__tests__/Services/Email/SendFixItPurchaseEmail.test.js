@@ -17,7 +17,7 @@ jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({ findOne: j
 
 const User = require('../../../models/user-auth/userModel.js');
 const Seller = require('../../../models/user-auth/sellerCentralModel.js');
-const { sendFixItPurchaseEmail } = require('../../../Services/Email/SendFixItPurchaseEmail.js');
+const { sendFixItPurchaseEmail, sendFixItCancellationEmail } = require('../../../Services/Email/SendFixItPurchaseEmail.js');
 
 const lean = (value) => ({ select: () => ({ lean: async () => value }) });
 const leanCatch = (value) => ({ select: () => ({ lean: () => ({ catch: () => Promise.resolve(value) }) }) });
@@ -97,5 +97,35 @@ describe('the Zoho section', () => {
   it('says there is no Zoho task for a seller who is not an ESF client', async () => {
     await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'skipped' });
     expect(mockSendMail.mock.calls[0][0].text).toContain('Zoho project: Not an ESF client — no Zoho task');
+  });
+});
+
+describe('monthly subscriptions', () => {
+  it('the first month says a subscription started, and how it bills', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, billing: 'monthly', period: 1, periodEnd: '2026-11-27T00:00:00Z' });
+    const mail = mockSendMail.mock.calls[0][0];
+    expect(mail.subject).toBe('Fix it subscription started: Standard ($299/month) — Ann <b>Lee</b>');
+    expect(mail.text).toContain('Billing: Monthly subscription — month 1, covers until Fri, 27 Nov 2026; renews monthly until cancelled');
+    expect(mail.html).toContain('Monthly subscription — month 1');
+  });
+
+  it('a renewal names its month', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, billing: 'monthly', period: 3 });
+    expect(mockSendMail.mock.calls[0][0].subject).toBe('Fix it renewal: Standard, month 3 ($299) — Ann <b>Lee</b>');
+  });
+
+  it('a one-time Trial says so', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, packageName: 'Trial', amount: 25, billing: 'one_time' });
+    expect(mockSendMail.mock.calls[0][0].text).toContain('Billing: One-time');
+  });
+
+  it('tells support when a seller cancels, with how long the team keeps working', async () => {
+    const sub = { userId: 'u1', packageName: 'Standard', tasks: 30, status: 'active', cancelAtPeriodEnd: true, currentPeriodEnd: '2026-11-27T00:00:00Z', stripeSubscriptionId: 'sub_1' };
+    expect(await sendFixItCancellationEmail(sub)).toBe('m1');
+    const mail = mockSendMail.mock.calls[0][0];
+    expect(mail.to).toEqual(['support@estorefactory.com']);
+    expect(mail.subject).toBe('Fix it subscription cancelled: Standard, last paid month ends Fri, 27 Nov 2026 — Ann <b>Lee</b>');
+    expect(mail.text).toContain('It stays active until Fri, 27 Nov 2026; it will not renew after that.');
+    expect(mail.html).toContain('Ann &lt;b&gt;Lee&lt;/b&gt;');
   });
 });

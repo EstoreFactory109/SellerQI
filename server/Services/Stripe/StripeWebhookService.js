@@ -6,6 +6,7 @@ const PaymentLogs = require('../../models/system/PaymentLogsModel');
 const logger = require('../../utils/Logger');
 const { sendTrialToProSupportEmail } = require('../Email/SendTrialToProSupportEmail');
 const FixItCheckoutService = require('./FixItCheckoutService');
+const FixItSubscriptionService = require('./FixItSubscriptionService');
 
 class StripeWebhookService {
     constructor() {
@@ -305,6 +306,12 @@ class StripeWebhookService {
      */
     async handleSubscriptionCreated(subscription, webhookEventId = null) {
         try {
+            // A Fix it subscription (Tasks page) is not the SellerQI plan: handled apart, so its
+            // ending can never downgrade the seller or its renewals be booked as plan payments.
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             const userId = subscription.metadata?.userId;
             const planType = subscription.metadata?.planType;
 
@@ -414,6 +421,12 @@ class StripeWebhookService {
      */
     async handleSubscriptionUpdated(subscription, webhookEventId = null) {
         try {
+            // A Fix it subscription (Tasks page) is not the SellerQI plan: handled apart, so its
+            // ending can never downgrade the seller or its renewals be booked as plan payments.
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             const userId = subscription.metadata?.userId;
             const planType = subscription.metadata?.planType;
 
@@ -513,6 +526,12 @@ class StripeWebhookService {
      */
     async handleSubscriptionDeleted(subscription, webhookEventId = null) {
         try {
+            // A Fix it subscription (Tasks page) is not the SellerQI plan: handled apart, so its
+            // ending can never downgrade the seller or its renewals be booked as plan payments.
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             const userId = subscription.metadata?.userId;
 
             // Validate required metadata
@@ -571,6 +590,11 @@ class StripeWebhookService {
 
             // Get subscription from Stripe to get metadata
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                // A paid month of a Fix it subscription: its own Zoho task and support email.
+                await FixItSubscriptionService.recordRenewal(invoice, subscription, webhookEventId);
+                return;
+            }
             let userId = subscription.metadata?.userId;
             let planType = subscription.metadata?.planType;
 
@@ -761,6 +785,11 @@ class StripeWebhookService {
 
             // Get subscription from Stripe to get metadata and status
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                // Stripe retries the card itself; the subscription's status (past_due) is all we track.
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             let userId = subscription.metadata?.userId;
             let planType = subscription.metadata?.planType;
 
@@ -881,6 +910,12 @@ class StripeWebhookService {
      */
     async handleTrialWillEnd(subscription, webhookEventId = null) {
         try {
+            // A Fix it subscription (Tasks page) is not the SellerQI plan: handled apart, so its
+            // ending can never downgrade the seller or its renewals be booked as plan payments.
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             const userId = subscription.metadata?.userId;
             const planType = subscription.metadata?.planType;
 

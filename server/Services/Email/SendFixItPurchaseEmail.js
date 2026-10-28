@@ -70,6 +70,12 @@ const zohoLines = (purchase) => {
     }
 };
 
+const billingLine = (purchase) => {
+    if (purchase.billing !== 'monthly') return 'One-time';
+    const until = purchase.periodEnd ? `, covers until ${new Date(purchase.periodEnd).toUTCString().slice(0, 16)}` : '';
+    return `Monthly subscription — month ${purchase.period || 1}${until}; renews monthly until cancelled`;
+};
+
 const recipients = () => (process.env.FIXIT_PURCHASE_NOTIFY_EMAIL || DEFAULT_RECIPIENT)
     .split(',').map((e) => e.trim()).filter(Boolean);
 
@@ -124,6 +130,7 @@ const sendFixItPurchaseEmail = async (purchase) => {
         customerId: purchase.stripeCustomerId || 'N/A',
         zohoProject: zohoLines(purchase).project,
         zohoTask: zohoLines(purchase).task,
+        billingLine: billingLine(purchase),
     };
 
     const html = Object.entries(fields).reduce(
@@ -133,9 +140,20 @@ const sendFixItPurchaseEmail = async (purchase) => {
     const newProject = purchase.zohoProjectSource === 'created' && purchase.zohoProjectName
         ? ` — new Zoho project "${purchase.zohoProjectName}"`
         : '';
-    const subject = `Fix it purchase: ${purchase.packageName} (${amountPaid}) — ${userName}${newProject}`;
+    const monthly = purchase.billing === 'monthly';
+    const renewal = monthly && Number(purchase.period) > 1;
+    const subject = renewal
+        ? `Fix it renewal: ${purchase.packageName}, month ${purchase.period} (${amountPaid}) — ${userName}${newProject}`
+        : monthly
+            ? `Fix it subscription started: ${purchase.packageName} (${amountPaid}/month) — ${userName}${newProject}`
+            : `Fix it purchase: ${purchase.packageName} (${amountPaid}) — ${userName}${newProject}`;
     const text = [
-        `${userName} bought the Fix it ${purchase.packageName} package (${purchase.tasks} tasks) for ${amountPaid}.`,
+        renewal
+            ? `${userName}'s Fix it ${purchase.packageName} subscription renewed: month ${purchase.period}, ${purchase.tasks} more tasks, ${amountPaid} paid.`
+            : monthly
+                ? `${userName} subscribed to Fix it ${purchase.packageName}: ${purchase.tasks} tasks a month for ${amountPaid}/month.`
+                : `${userName} bought the Fix it ${purchase.packageName} package (${purchase.tasks} tasks) for ${amountPaid}.`,
+        `Billing: ${fields.billingLine}`,
         '',
         `Email: ${fields.userEmail}`,
         `Phone: ${fields.userPhone}`,
@@ -159,6 +177,11 @@ const sendFixItPurchaseEmail = async (purchase) => {
         emailProvider: 'AWS_SES',
     });
 
+    return deliver({ emailLog, to, replyTo: user.email, subject, text, html, label: `purchase ${purchase._id}` });
+};
+
+/** One SES send with its EmailLogs row. Never throws: the message id, or false. */
+const deliver = async ({ emailLog, to, replyTo, subject, text, html, label }) => {
     try {
         await emailLog.save();
         const transporter = nodemailer.createTransport({
@@ -168,15 +191,46 @@ const sendFixItPurchaseEmail = async (purchase) => {
             auth: { user: process.env.ADMIN_USERNAME, pass: process.env.APP_PASSWORD },
         });
         const from = process.env.SELF_MAIL_ID || process.env.ADMIN_EMAIL_ID?.split(',')[0]?.trim() || 'support@sellerqi.com';
-        const info = await transporter.sendMail({ from, to, replyTo: user.email || undefined, subject, text, html });
+        const info = await transporter.sendMail({ from, to, replyTo: replyTo || undefined, subject, text, html });
         await emailLog.markAsSent();
-        logger.info(`[FixIt] support email for purchase ${purchase._id} sent to ${to.join(', ')} (${info.messageId})`);
+        logger.info(`[FixIt] support email for ${label} sent to ${to.join(', ')} (${info.messageId})`);
         return info.messageId;
     } catch (error) {
-        logger.error(`[FixIt] support email for purchase ${purchase._id} failed: ${error.message}`);
+        logger.error(`[FixIt] support email for ${label} failed: ${error.message}`);
         await emailLog.markAsFailed(error.message).catch(() => {});
         return false;
     }
 };
 
-module.exports = { sendFixItPurchaseEmail, DEFAULT_RECIPIENT, escapeHtml };
+/**
+ * A seller cancelled their Fix it subscription (or it ended): the team stops after the month
+ * that is already paid for.
+ * @param {object} sub  a FixItSubscription (plain object)
+ */
+const sendFixItCancellationEmail = async (sub) => {
+    const to = recipients();
+    const user = await User.findById(sub.userId).select('firstName lastName email phone whatsapp needsPhoneUpdate phoneUpdateReason').lean().catch(() => null);
+    if (!user) return false;
+    const userName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+    const ended = sub.status === 'canceled';
+    const until = sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toUTCString().slice(0, 16) : 'the end of the paid month';
+    const subject = ended
+        ? `Fix it subscription ended: ${sub.packageName} — ${userName}`
+        : `Fix it subscription cancelled: ${sub.packageName}, last paid month ends ${until} — ${userName}`;
+    const text = [
+        ended
+            ? `${userName}'s Fix it ${sub.packageName} subscription has ended. No further months will be billed.`
+            : `${userName} cancelled their Fix it ${sub.packageName} subscription (${sub.tasks} tasks/month). It stays active until ${until}; it will not renew after that.`,
+        '',
+        `Email: ${user.email || 'N/A'}`,
+        `Phone: ${phoneOf(user, 'phone')}`,
+        `WhatsApp: ${phoneOf(user, 'whatsapp')}`,
+        `Stripe subscription: https://dashboard.stripe.com/subscriptions/${sub.stripeSubscriptionId}`,
+        `SellerQI user ID: ${String(user._id)}`,
+    ].join('\n');
+    const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;max-width:600px">${text.split('\n').map((l) => (l ? `<p style="margin:0 0 8px">${escapeHtml(l)}</p>` : '')).join('')}</div>`;
+    const emailLog = new EmailLogs({ emailType: 'OTHER', receiverEmail: to.join(', '), receiverId: null, status: 'PENDING', subject, emailContent: text, emailProvider: 'AWS_SES' });
+    return deliver({ emailLog, to, replyTo: user.email, subject, text, html, label: `subscription ${sub.stripeSubscriptionId}` });
+};
+
+module.exports = { sendFixItPurchaseEmail, sendFixItCancellationEmail, DEFAULT_RECIPIENT, escapeHtml };

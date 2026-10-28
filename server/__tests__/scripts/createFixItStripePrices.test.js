@@ -17,14 +17,15 @@ const fakeStripe = (existing = {}) => ({
 });
 const quiet = () => {};
 
-it('creates a product and one-time USD price for each missing package', async () => {
+it('creates what is missing: the Trial one-time, Standard and Accelerated monthly', async () => {
   const stripe = fakeStripe({ sqi_fixit_trial: { id: 'price_t', active: true, unit_amount: 2500, currency: 'usd', type: 'one_time', product: { name: 'x' } } });
   const out = await run({ stripe, log: quiet });
   expect(out.problems).toBe(0);
   expect(stripe.prices.create).toHaveBeenCalledTimes(2);
-  expect(stripe.prices.create).toHaveBeenCalledWith(expect.objectContaining({ currency: 'usd', unit_amount: 29900, lookup_key: 'sqi_fixit_standard', product: 'prod_standard' }));
-  expect(stripe.products.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'SellerQI Fix it: Accelerated (60 tasks)' }));
-  expect(stripe.prices.create.mock.calls.every(([p]) => !('recurring' in p))).toBe(true);
+  expect(stripe.prices.create).toHaveBeenCalledWith(expect.objectContaining({
+    currency: 'usd', unit_amount: 29900, lookup_key: 'sqi_fixit_standard_monthly', product: 'prod_standard', recurring: { interval: 'month' },
+  }));
+  expect(stripe.products.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'SellerQI Fix it: Accelerated (60 tasks per month)' }));
 });
 
 it('a dry run creates nothing', async () => {
@@ -35,10 +36,15 @@ it('a dry run creates nothing', async () => {
 });
 
 it('reports, and does not change, a price with the wrong amount', async () => {
-  const stripe = fakeStripe({ sqi_fixit_standard: { id: 'price_s', active: true, unit_amount: 19900, currency: 'usd', type: 'one_time', product: { name: 'x' } } });
+  const stripe = fakeStripe({ sqi_fixit_standard_monthly: { id: 'price_s', active: true, unit_amount: 19900, currency: 'usd', type: 'recurring', recurring: { interval: 'month' }, product: { name: 'x' } } });
   const out = await run({ stripe, log: quiet });
   expect(out.problems).toBe(1);
-  expect(stripe.prices.create).not.toHaveBeenCalledWith(expect.objectContaining({ lookup_key: 'sqi_fixit_standard' }));
+  expect(stripe.prices.create).not.toHaveBeenCalledWith(expect.objectContaining({ lookup_key: 'sqi_fixit_standard_monthly' }));
+});
+
+it('a one-time price under a monthly lookup key is a problem, not a match', async () => {
+  const stripe = fakeStripe({ sqi_fixit_accelerated_monthly: { id: 'price_a', active: true, unit_amount: 49900, currency: 'usd', type: 'one_time', product: { name: 'x' } } });
+  expect((await run({ stripe, log: quiet })).problems).toBe(1);
 });
 
 it('the server packages match what the Tasks page shows', () => {

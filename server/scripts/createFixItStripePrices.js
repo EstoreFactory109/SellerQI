@@ -1,7 +1,8 @@
 /**
  * Script: create the "Fix it" package Products and Prices in Stripe.
  *
- * One Product + one one-time USD Price per package in server/Services/Stripe/fixItPackages.js.
+ * One Product + one USD Price per package in server/Services/Stripe/fixItPackages.js: one-time
+ * for the Trial, recurring monthly for the subscription packages.
  * The code finds each Price by its lookup_key (sqi_fixit_trial / _standard / _accelerated),
  * so nothing needs to go in .env afterwards.
  *
@@ -16,7 +17,7 @@
  */
 require('dotenv').config();
 
-const { FIX_IT_PACKAGES, productName } = require('../Services/Stripe/fixItPackages.js');
+const { FIX_IT_PACKAGES, productName, isMonthly, priceMatches } = require('../Services/Stripe/fixItPackages.js');
 
 const run = async ({ stripe, dryRun = false, log = console.log } = {}) => {
     const mode = String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_live_') ? 'LIVE' : 'TEST';
@@ -30,7 +31,7 @@ const run = async ({ stripe, dryRun = false, log = console.log } = {}) => {
         const existing = data?.[0];
 
         if (existing) {
-            const ok = existing.active && existing.unit_amount === amount && existing.currency === 'usd' && existing.type === 'one_time';
+            const ok = priceMatches(existing, pkg);
             if (!ok) problems += 1;
             log(`${ok ? 'OK     ' : 'PROBLEM'} ${pkg.lookupKey}: ${existing.id} ${existing.currency} ${existing.unit_amount / 100} ${existing.type}${existing.active ? '' : ' (inactive)'} — "${existing.product?.name || existing.product}"`);
             results.push({ packageId: pkg.id, priceId: existing.id, created: false, ok });
@@ -38,25 +39,28 @@ const run = async ({ stripe, dryRun = false, log = console.log } = {}) => {
         }
 
         if (dryRun) {
-            log(`MISSING ${pkg.lookupKey}: would create "${productName(pkg)}" at $${pkg.priceUsd} (one-time)`);
+            log(`MISSING ${pkg.lookupKey}: would create "${productName(pkg)}" at $${pkg.priceUsd} (${isMonthly(pkg) ? 'monthly' : 'one-time'})`);
             results.push({ packageId: pkg.id, priceId: null, created: false, ok: false });
             continue;
         }
 
         const product = await stripe.products.create({
             name: productName(pkg),
-            description: `ESF's team fixes ${pkg.tasks} of your SellerQI tasks.`,
-            metadata: { purchaseType: 'fixit', packageId: pkg.id, tasks: String(pkg.tasks) },
+            description: isMonthly(pkg)
+                ? `ESF's team fixes ${pkg.tasks} of your SellerQI tasks every month.`
+                : `ESF's team fixes ${pkg.tasks} of your SellerQI tasks.`,
+            metadata: { purchaseType: 'fixit', packageId: pkg.id, tasks: String(pkg.tasks), billing: pkg.billing },
         });
         const price = await stripe.prices.create({
             product: product.id,
             currency: 'usd',
             unit_amount: amount,
             lookup_key: pkg.lookupKey,
-            nickname: `Fix it ${pkg.name}`,
+            nickname: `Fix it ${pkg.name}${isMonthly(pkg) ? ' (monthly)' : ''}`,
+            ...(isMonthly(pkg) ? { recurring: { interval: 'month' } } : {}),
             metadata: { purchaseType: 'fixit', packageId: pkg.id },
         });
-        log(`CREATED ${pkg.lookupKey}: product ${product.id}, price ${price.id} ($${pkg.priceUsd})`);
+        log(`CREATED ${pkg.lookupKey}: product ${product.id}, price ${price.id} ($${pkg.priceUsd}${isMonthly(pkg) ? '/month' : ''})`);
         results.push({ packageId: pkg.id, priceId: price.id, created: true, ok: true });
     }
 

@@ -33,6 +33,15 @@ describe('Fix it success page', () => {
     expect(await screen.findByText('Tasks page')).toBeInTheDocument();
   });
 
+  it('a monthly package says it is a subscription, when it renews, and where to cancel', async () => {
+    stripeService.confirmFixItPurchase.mockResolvedValue({ status: 'paid', purchase: { billing: 'monthly', packageName: 'Accelerated', tasks: 60, renewsAt: '2026-11-27T12:00:00Z' } });
+    renderAt('/fix-it/success?session_id=cs_test_1');
+    expect(await screen.findByText(/subscribed to/)).toBeInTheDocument();
+    expect(screen.getByText(/Fix it Accelerated/)).toBeInTheDocument();
+    expect(screen.getByText(/It renews on .*2026/)).toBeInTheDocument();
+    expect(screen.getByText(/cancel any time from the Tasks page/)).toBeInTheDocument();
+  });
+
   it('retries while Stripe is still processing, then says not to pay again', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     stripeService.confirmFixItPurchase.mockResolvedValue({ status: 'processing' });

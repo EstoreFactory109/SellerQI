@@ -1,5 +1,8 @@
 /**
- * One "Fix it" package purchase (one-time Stripe Checkout payment).
+ * One PAID PERIOD of a "Fix it" package: the one-time Trial, or one month of a Standard /
+ * Accelerated subscription (each renewal invoice is its own row, with its own Zoho task and
+ * support email). Renewal rows use `inv:<invoiceId>` as their stripeSessionId, so the
+ * existing unique index on it keeps one row per invoice.
  *
  * Written `pending` when checkout starts, `paid` when Stripe says so (webhook or the success
  * page, whichever comes first), `refunded` on a full refund, `expired` if checkout was
@@ -18,6 +21,12 @@ const fixItPurchaseSchema = new mongoose.Schema(
         currency: { type: String, default: 'USD' },
         status: { type: String, enum: ['pending', 'paid', 'refunded', 'expired'], default: 'pending', index: true },
         stripeSessionId: { type: String, required: true, unique: true },
+        // Subscription packages: which subscription, which invoice, which month (1 = first).
+        billing: { type: String, enum: ['one_time', 'monthly'], default: 'one_time' },
+        stripeSubscriptionId: { type: String, default: null, index: true },
+        stripeInvoiceId: { type: String, default: null },
+        period: { type: Number, default: null },
+        periodEnd: { type: Date, default: null },
         stripePaymentIntentId: { type: String, default: null, index: true },
         stripeCustomerId: { type: String, default: null },
         paidAt: { type: Date, default: null },

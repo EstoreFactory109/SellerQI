@@ -1,5 +1,6 @@
 /**
- * Buying a "Fix it" package: a one-time Stripe Checkout payment.
+ * Buying a "Fix it" package through Stripe Checkout: the Trial as a one-time payment, Standard
+ * and Accelerated as monthly subscriptions (renewals: FixItSubscriptionService).
  *
  *   start   — createFixItCheckout: the server picks the price (by lookup_key); the client only
  *             names the package. Never touches the seller's Subscription.
@@ -16,13 +17,16 @@ const FixItPurchase = require('../../models/system/FixItPurchaseModel.js');
 const User = require('../../models/user-auth/userModel.js');
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
-const { getFixItPackage, productName } = require('./fixItPackages.js');
+const FixItSubscription = require('../../models/system/FixItSubscriptionModel.js');
+const { getFixItPackage, productName, isMonthly, priceMatches } = require('./fixItPackages.js');
 const { sendFixItPurchaseEmail } = require('../Email/SendFixItPurchaseEmail.js');
 const { addFixItTaskToZoho } = require('./FixItZohoService.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const logger = require('../../utils/Logger.js');
 
 const PURCHASE_TYPE = 'fixit';
+// Lazy: FixItSubscriptionService requires this module (runInBackground) too.
+const FixItSubscriptionService = () => require('./FixItSubscriptionService.js');
 const stripe = () => StripeService.stripe;
 
 const frontendBase = () => {
@@ -43,7 +47,7 @@ const resolvePrice = async (pkg) => {
         logger.error(`[FixIt] no active Stripe price with lookup_key ${pkg.lookupKey} — run server/scripts/createFixItStripePrices.js`);
         throw new ApiError(503, 'Fix it packages cannot be bought right now. Please contact support.');
     }
-    if (price.currency !== 'usd' || price.unit_amount !== pkg.priceUsd * 100 || price.type !== 'one_time') {
+    if (!priceMatches(price, pkg)) {
         logger.error(`[FixIt] Stripe price ${price.id} (${price.unit_amount} ${price.currency}, ${price.type}) does not match ${pkg.id} $${pkg.priceUsd}`);
         throw new ApiError(503, 'Fix it packages cannot be bought right now. Please contact support.');
     }
@@ -83,18 +87,31 @@ const createFixItCheckout = async (userId, { packageId, openTasks, monthlyRecove
     const user = await User.findById(userId).select('firstName lastName email').lean();
     if (!user) throw new ApiError(404, 'User not found');
 
+    // One Fix it subscription at a time: a second would bill twice for the same team.
+    if (isMonthly(pkg)) {
+        const live = await FixItSubscription.findOne({ userId: user._id, status: { $in: FixItSubscription.LIVE_STATUSES } })
+            .select('packageName').lean();
+        if (live) {
+            throw new ApiError(409, `You already have the Fix it ${live.packageName} subscription. You can manage or cancel it at the top of the Tasks page.`);
+        }
+    }
+
     const priceId = await resolvePrice(pkg);
     const customer = await customerFor(user);
     const metadata = { userId: String(user._id), purchaseType: PURCHASE_TYPE, packageId: pkg.id };
     const base = frontendBase();
 
     const session = await stripe().checkout.sessions.create({
-        mode: 'payment',
+        mode: isMonthly(pkg) ? 'subscription' : 'payment',
         customer: customer.id,
         line_items: [{ price: priceId, quantity: 1 }],
         metadata,
-        // receipt_email makes Stripe send the seller a receipt whatever the dashboard setting.
-        payment_intent_data: { metadata, description: productName(pkg), ...(user.email ? { receipt_email: user.email } : {}) },
+        ...(isMonthly(pkg)
+            // The subscription carries purchaseType too: every renewal and status webhook is
+            // routed by it, away from the SellerQI-plan handlers.
+            ? { subscription_data: { metadata, description: productName(pkg) } }
+            // receipt_email makes Stripe send the seller a receipt whatever the dashboard setting.
+            : { payment_intent_data: { metadata, description: productName(pkg), ...(user.email ? { receipt_email: user.email } : {}) } }),
         allow_promotion_codes: true,
         success_url: `${base}/fix-it/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${base}/seller-central-checker/tasks?fixit=cancelled`,
@@ -109,6 +126,8 @@ const createFixItCheckout = async (userId, { packageId, openTasks, monthlyRecove
         currency: 'USD',
         stripeSessionId: session.id,
         stripeCustomerId: customer.id,
+        billing: pkg.billing,
+        period: isMonthly(pkg) ? 1 : null,
         openTasks: finiteOrNull(openTasks),
         monthlyRecoverable: finiteOrNull(monthlyRecoverable),
         atStakeCurrency: typeof atStakeCurrency === 'string' ? atStakeCurrency.slice(0, 5) : null,
@@ -215,8 +234,14 @@ const completeFixItPurchase = async (session, { source = 'API', webhookEventId =
         return null;
     }
     const pkg = getFixItPackage(session.metadata.packageId);
-    const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || null;
-    const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id || null;
+    const idOf = (v) => (typeof v === 'string' ? v : v?.id || null);
+    const customerId = idOf(session.customer);
+    const subscriptionId = idOf(session.subscription);
+    const invoiceId = idOf(session.invoice);
+    // A subscription's first payment is an invoice; its payment intent (for matching a later
+    // refund) hangs off the invoice's payments since API 2025-03-31.basil.
+    const paymentIntentId = idOf(session.payment_intent)
+        || (invoiceId ? await FixItSubscriptionService().paymentIntentOfInvoice(invoiceId) : null);
     const amount = typeof session.amount_total === 'number' ? session.amount_total / 100 : null;
 
     let purchase = await FixItPurchase.findOne({ stripeSessionId: session.id });
@@ -245,9 +270,12 @@ const completeFixItPurchase = async (session, { source = 'API', webhookEventId =
             currency: (session.currency || 'usd').toUpperCase(),
             stripePaymentIntentId: paymentIntentId,
             stripeCustomerId: customerId || purchase.stripeCustomerId,
+            ...(subscriptionId ? { billing: 'monthly', period: 1, stripeSubscriptionId: subscriptionId, stripeInvoiceId: invoiceId } : {}),
         } },
         { new: true }
     );
+    // The subscription record exists from the first payment, whichever webhook comes first.
+    if (subscriptionId) await FixItSubscriptionService().syncFromStripe(subscriptionId).catch((error) => logger.warn(`[FixIt] could not read subscription ${subscriptionId}: ${error.message}`));
     const current = transitioned || await FixItPurchase.findById(purchase._id);
 
     if (transitioned || webhookEventId) {
@@ -290,15 +318,20 @@ const confirmFixItPurchase = async (sessionId, userId) => {
     }
     const purchase = await completeFixItPurchase(session, { source: 'API' });
     if (!purchase || purchase.status !== 'paid') return { status: 'processing' };
+    const subscription = purchase.stripeSubscriptionId
+        ? await FixItSubscription.findOne({ stripeSubscriptionId: purchase.stripeSubscriptionId }).select('currentPeriodEnd').lean()
+        : null;
     return {
         status: 'paid',
         purchase: {
+            billing: purchase.billing || 'one_time',
             packageId: purchase.packageId,
             packageName: purchase.packageName,
             tasks: purchase.tasks,
             amount: purchase.amount,
             currency: purchase.currency,
             paidAt: purchase.paidAt,
+            renewsAt: subscription?.currentPeriodEnd || null,
         },
     };
 };
@@ -351,6 +384,8 @@ module.exports = {
     expireFixItCheckout,
     handleFixItRefund,
     runAfterPayment,
+    runInBackground,
     drainBackground,
+    frontendBase,
     _priceCache: priceCache,
 };

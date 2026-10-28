@@ -19,10 +19,14 @@ describe('FixItPackagesModal', () => {
     expect(screen.getByText('$25')).toBeInTheDocument();
     expect(screen.getByText('2 tasks')).toBeInTheDocument();
     expect(screen.getByText('$299')).toBeInTheDocument();
-    expect(screen.getByText('30 tasks')).toBeInTheDocument();
+    expect(screen.getByText('30 tasks a month')).toBeInTheDocument();
     expect(screen.getByText('1 task per day')).toBeInTheDocument();
     expect(screen.getByText('$499')).toBeInTheDocument();
-    expect(screen.getByText('60 tasks')).toBeInTheDocument();
+    expect(screen.getByText('60 tasks a month')).toBeInTheDocument();
+    // Trial is a one-off; the other two are monthly subscriptions.
+    expect(screen.getByText('One-time payment')).toBeInTheDocument();
+    expect(screen.getAllByText('Billed monthly · cancel anytime')).toHaveLength(2);
+    expect(screen.getAllByText('/month')).toHaveLength(2);
     expect(screen.getByText('2 tasks per day')).toBeInTheDocument();
     expect(screen.getAllByRole('radio')).toHaveLength(3);
   });
@@ -41,7 +45,7 @@ describe('FixItPackagesModal', () => {
     open();
     fireEvent.click(screen.getByText('$299').closest('button'));
     expect(screen.getByText('$299').closest('button')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('button', { name: 'Purchase for $299' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Subscribe for $299/month' })).toBeEnabled();
   });
 
   it('only one package is selected at a time', () => {
@@ -49,7 +53,7 @@ describe('FixItPackagesModal', () => {
     fireEvent.click(screen.getByText('$25').closest('button'));
     fireEvent.click(screen.getByText('$499').closest('button'));
     expect(screen.getAllByRole('radio').filter(r => r.getAttribute('aria-checked') === 'true')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Purchase for $499' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Subscribe for $499/month' })).toBeInTheDocument();
   });
 
   it('hands the chosen package to onPurchase', () => {
@@ -143,9 +147,21 @@ describe('FixItPackagesModal - value for this seller', () => {
     window.gtag = vi.fn();
     open({ openTasks: OPEN, currency: '$' });
     fireEvent.click(screen.getByText('$499').closest('button'));
-    fireEvent.click(screen.getByRole('button', { name: 'Purchase for $499' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Subscribe for $499/month' }));
     expect(window.gtag).toHaveBeenCalledWith('event', 'fixit_package_select', { package_id: 'accelerated' });
     expect(window.gtag).toHaveBeenCalledWith('event', 'fixit_purchase_click', { package_id: 'accelerated', price: 499 });
     delete window.gtag;
+  });
+});
+
+describe('FixItPackagesModal - an existing subscription', () => {
+  it('marks the current plan and blocks a second subscription, but the Trial stays available', () => {
+    render(<FixItPackagesModal open onClose={() => {}} onPurchase={vi.fn()} currentSubscription={{ live: true, packageId: 'standard', packageName: 'Standard' }} />);
+    expect(screen.getByText('Your plan')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('$499').closest('button'));
+    expect(screen.getByText('$499').closest('button')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText(/You're subscribed to Standard/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('$25').closest('button'));
+    expect(screen.getByRole('button', { name: 'Purchase for $25' })).toBeEnabled();
   });
 });

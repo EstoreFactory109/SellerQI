@@ -116,6 +116,9 @@ const taskDescription = (purchase, user, brand) => {
         `${fullName(user) || user.email} bought the Fix it ${purchase.packageName} package through SellerQI on ${new Date(purchase.paidAt || Date.now()).toUTCString()}.`,
         '',
         `Package: ${purchase.packageName} — fix ${purchase.tasks} of their SellerQI tasks (${PACE[purchase.packageId] || 'as agreed'}).`,
+        ...(purchase.billing === 'monthly'
+            ? [`Monthly subscription, month ${purchase.period || 1}: ${purchase.tasks} tasks for this month${purchase.periodEnd ? `, paid up to ${new Date(purchase.periodEnd).toUTCString().slice(0, 16)}` : ''}. A new task is added each month it renews.`]
+            : []),
         `Paid: ${money(purchase.amount, purchase.currency)}${pkg && purchase.amount !== pkg.priceUsd ? ` (list price $${pkg.priceUsd})` : ''}.`,
     ];
     if (typeof purchase.openTasks === 'number') {
@@ -160,7 +163,9 @@ const addFixItTaskToZoho = async (purchase) => {
 
         project = await resolveProject(user, brand);
         const tasklistId = await fixItTasklist(project.projectId, project.portalId);
-        const taskName = `Fix it – ${purchase.packageName} package: fix ${purchase.tasks} tasks (paid ${money(purchase.amount, purchase.currency)})`;
+        const taskName = purchase.billing === 'monthly'
+            ? `Fix it – ${purchase.packageName} subscription, month ${purchase.period || 1}: fix ${purchase.tasks} tasks (paid ${money(purchase.amount, purchase.currency)})`
+            : `Fix it – ${purchase.packageName} package: fix ${purchase.tasks} tasks (paid ${money(purchase.amount, purchase.currency)})`;
         const due = new Date(Date.now() + (DAYS_TO_FINISH[purchase.packageId] || 30) * 86400000);
         const task = await ZohoProjectsService.createTask({
             projectId: project.projectId,

@@ -149,6 +149,7 @@ const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 const FixItPurchase = require('../../models/system/FixItPurchaseModel.js');
+const FixItSubscription = require('../../models/system/FixItSubscriptionModel.js');
 
 /** @type {{ model: import('mongoose').Model, key: string }[]} Collections with User (ObjectId) */
 const collectionsWithUser = [
@@ -306,6 +307,7 @@ const billingHistoryCollections = [
     { model: PaymentLogs, key: 'userId' },
     // Fix it package purchases are payments too.
     { model: FixItPurchase, key: 'userId' },
+    { model: FixItSubscription, key: 'userId' },
 ];
 
 /** EmailLogs uses receiverId */

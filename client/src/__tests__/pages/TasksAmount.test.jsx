@@ -22,7 +22,7 @@ vi.mock('../../utils/featureFlags.js', async (importOriginal) => ({
   get FIX_IT_PACKAGES() { return flags.FIX_IT_PACKAGES; },
 }));
 
-const stripe = vi.hoisted(() => ({ startFixItCheckout: vi.fn() }));
+const stripe = vi.hoisted(() => ({ startFixItCheckout: vi.fn(), getFixItSubscription: vi.fn(async () => null) }));
 vi.mock('../../services/stripeService.js', () => ({ default: stripe }));
 
 vi.mock('../../redux/slices/TasksSlice.js', async () => {
@@ -346,7 +346,7 @@ describe('Tasks page - Fix it', () => {
     renderTasks();
     fireEvent.click(screen.getByRole('button', { name: /Fix it/ }));
     fireEvent.click(screen.getByRole('radio', { name: /Standard/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Purchase for $299' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Subscribe for $299/month' }));
     expect(stripe.startFixItCheckout).toHaveBeenCalledWith({
       packageId: 'standard', openTasks: 9, monthlyRecoverable: 1007.03, atStakeCurrency: 'A$',
     });

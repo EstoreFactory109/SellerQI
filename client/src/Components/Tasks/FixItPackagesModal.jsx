@@ -20,6 +20,10 @@ import { trackEvent } from '../../utils/analytics.js';
  *
  * Given the seller's open tasks, each package shows what its task count could
  * cover (the highest-value open tasks) and how fast that pays back the price.
+ *
+ * The Trial is a one-time payment; Standard and Accelerated are monthly subscriptions (N tasks
+ * every month until cancelled). A seller who already has one (`currentSubscription`) cannot
+ * pick a second; the server refuses it too.
  */
 export const FIX_IT_PACKAGES = [
   {
@@ -27,6 +31,7 @@ export const FIX_IT_PACKAGES = [
     name: 'Trial',
     price: 25,
     tasks: 2,
+    billing: 'one_time',
     pace: 'A quick way to see the work first-hand',
   },
   {
@@ -34,6 +39,7 @@ export const FIX_IT_PACKAGES = [
     name: 'Standard',
     price: 299,
     tasks: 30,
+    billing: 'monthly',
     pace: '1 task per day',
   },
   {
@@ -41,11 +47,13 @@ export const FIX_IT_PACKAGES = [
     name: 'Accelerated',
     price: 499,
     tasks: 60,
+    billing: 'monthly',
     pace: '2 tasks per day',
   },
 ];
 
 const formatPrice = (n) => `$${n.toLocaleString('en-US')}`;
+export const isMonthly = (pkg) => pkg?.billing === 'monthly';
 
 // Prices are USD. Payback compares a price with recovered profit, so it is only
 // meaningful when the seller's amounts are in USD too.
@@ -59,7 +67,7 @@ const PRICE_CURRENCY = '$';
  * @param {Array} [props.openTasks] - tasks still to do, with `amount`
  * @param {string} [props.currency] - the marketplace currency symbol for task amounts
  */
-const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '$', purchasing = false, purchaseError = '' }) => {
+const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '$', purchasing = false, purchaseError = '', currentSubscription = null }) => {
   const [selectedId, setSelectedId] = useState(null);
   const [notice, setNotice] = useState('');
 
@@ -85,7 +93,11 @@ const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '
   const hasTasks = Array.isArray(openTasks) && openTasks.length > 0;
   const recommendedId = hasTasks ? recommendPackageId(openTasks.length) : null;
 
+  const subscribed = Boolean(currentSubscription?.live);
+  const unavailable = (pkg) => subscribed && isMonthly(pkg);
+
   const selectPackage = (pkg) => {
+    if (unavailable(pkg)) return;
     setSelectedId(pkg.id);
     setNotice('');
     trackEvent('fixit_package_select', { package_id: pkg.id });
@@ -151,15 +163,25 @@ const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '
                 type="button"
                 role="radio"
                 aria-checked={isOn}
+                aria-disabled={unavailable(pkg) || undefined}
                 onClick={() => selectPackage(pkg)}
                 className="relative text-left rounded-xl border px-4 py-4 transition-colors"
                 style={{
                   borderColor: isOn ? COLORS.accent : COLORS.border,
                   background: isOn ? 'rgba(59,130,246,.10)' : COLORS.bgBase,
                   boxShadow: isOn ? `0 0 0 1px ${COLORS.accent}` : 'none',
+                  opacity: unavailable(pkg) ? 0.55 : 1,
+                  cursor: unavailable(pkg) ? 'not-allowed' : 'pointer',
                 }}
               >
-                {isRecommended && (
+                {subscribed && currentSubscription.packageId === pkg.id ? (
+                  <span
+                    className="absolute -top-2.5 left-4 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+                    style={{ background: COLORS.good, color: '#061021' }}
+                  >
+                    Your plan
+                  </span>
+                ) : isRecommended && !unavailable(pkg) && (
                   <span
                     className="absolute -top-2.5 left-4 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
                     style={{ background: COLORS.accent, color: '#061021' }}
@@ -181,10 +203,14 @@ const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '
                   </span>
                 </div>
                 <div className="mt-2 text-3xl font-bold tabular-nums leading-9" style={{ color: COLORS.textPrimary }}>
-                  {formatPrice(pkg.price)}
+                  <span>{formatPrice(pkg.price)}</span>
+                  {isMonthly(pkg) && <span className="text-sm font-medium" style={{ color: COLORS.textSecondary }}>/month</span>}
                 </div>
                 <div className="mt-1 text-sm font-medium" style={{ color: COLORS.textPrimary }}>
-                  {pkg.tasks} tasks
+                  {pkg.tasks} tasks{isMonthly(pkg) ? ' a month' : ''}
+                </div>
+                <div className="mt-0.5 text-[11px] font-medium" style={{ color: isMonthly(pkg) ? COLORS.accent : COLORS.textMuted }}>
+                  {isMonthly(pkg) ? 'Billed monthly · cancel anytime' : 'One-time payment'}
                 </div>
                 <div className="mt-0.5 text-xs" style={{ color: COLORS.textMuted }}>{pkg.pace}</div>
                 {value && (
@@ -230,8 +256,12 @@ const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="m-0 text-xs" style={{ color: COLORS.textMuted }}>
               {selected
-                ? `${selected.name}: ${selected.tasks} tasks for ${formatPrice(selected.price)}`
-                : 'Select a package to continue.'}
+                ? (isMonthly(selected)
+                  ? `${selected.name}: ${selected.tasks} tasks a month for ${formatPrice(selected.price)}/month`
+                  : `${selected.name}: ${selected.tasks} tasks for ${formatPrice(selected.price)}`)
+                : subscribed
+                  ? `You're subscribed to ${currentSubscription.packageName}. Manage it at the top of the Tasks page.`
+                  : 'Select a package to continue.'}
               {onPurchase && selected && ' · Secure payment by Stripe'}
             </p>
             <button
@@ -243,7 +273,9 @@ const FixItPackagesModal = ({ open, onClose, onPurchase, openTasks, currency = '
             >
               {purchasing
                 ? 'Redirecting to secure checkout…'
-                : selected ? `Purchase for ${formatPrice(selected.price)}` : 'Purchase'}
+                : selected
+                  ? (isMonthly(selected) ? `Subscribe for ${formatPrice(selected.price)}/month` : `Purchase for ${formatPrice(selected.price)}`)
+                  : 'Purchase'}
             </button>
           </div>
         </div>

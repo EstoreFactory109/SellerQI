@@ -61,11 +61,20 @@ export default function FixItSuccess() {
           <>
             <CheckCircle2 className="mx-auto h-12 w-12" style={{ color: COLORS.good }} />
             <h1 className="mt-4 text-xl font-semibold" style={{ color: COLORS.textPrimary }}>Payment received — thank you!</h1>
-            <p className="mt-3 text-sm leading-relaxed" style={{ color: COLORS.textSecondary }}>
-              You bought the <strong style={{ color: COLORS.textPrimary }}>{purchase?.packageName}</strong> package
-              {purchase?.tasks ? ` (${purchase.tasks} tasks)` : ''}. Our team will contact you within 1 business day
-              to start fixing your tasks. A receipt is on its way to your email.
-            </p>
+            {purchase?.billing === 'monthly' ? (
+              <p className="mt-3 text-sm leading-relaxed" style={{ color: COLORS.textSecondary }}>
+                You're subscribed to <strong style={{ color: COLORS.textPrimary }}>Fix it {purchase.packageName}</strong>: {purchase.tasks} tasks
+                a month. Our team will contact you within 1 business day to start.
+                {purchase.renewsAt ? ` It renews on ${new Date(purchase.renewsAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}` : ' It renews monthly'}
+                {' '}— you can cancel any time from the Tasks page. A receipt is on its way to your email.
+              </p>
+            ) : (
+              <p className="mt-3 text-sm leading-relaxed" style={{ color: COLORS.textSecondary }}>
+                You bought the <strong style={{ color: COLORS.textPrimary }}>{purchase?.packageName}</strong> package
+                {purchase?.tasks ? ` (${purchase.tasks} tasks)` : ''}. Our team will contact you within 1 business day
+                to start fixing your tasks. A receipt is on its way to your email.
+              </p>
+            )}
           </>
         )}
 

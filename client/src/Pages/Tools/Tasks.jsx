@@ -28,6 +28,7 @@ import {
 import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 import FixItPackagesModal from '../../Components/Tasks/FixItPackagesModal.jsx';
 import FixItUrgencyCard from '../../Components/Tasks/FixItUrgencyCard.jsx';
+import FixItSubscriptionCard, { useFixItSubscription } from '../../Components/Tasks/FixItSubscriptionCard.jsx';
 import { FIX_IT_PACKAGES } from '../../utils/featureFlags.js';
 import RemovalReceiptModal from '../../Components/Tasks/RemovalReceiptModal.jsx';
 import ApproveChangeModal from '../../Components/Tasks/ApproveChangeModal.jsx';
@@ -225,6 +226,8 @@ export default function Tasks() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showFixIt, setShowFixIt] = useState(false);
   const [fixItPurchasing, setFixItPurchasing] = useState(false);
+  // The seller's monthly Fix it subscription, if any: managed here, and stops a second one.
+  const { subscription: fixItSubscription, setSubscription: setFixItSubscription } = useFixItSubscription();
   const [fixItError, setFixItError] = useState('');
   // The task whose "approve this change on Amazon" dialog is open.
   const [approveTask, setApproveTask] = useState(null);
@@ -801,6 +804,8 @@ export default function Tasks() {
 
       {/* One card: what the open tasks cost, what threatens the account, and the
           way out. Every figure comes from the seller's own open tasks. */}
+      {FIX_IT_PACKAGES && <FixItSubscriptionCard subscription={fixItSubscription} onChange={setFixItSubscription} />}
+
       {fixItCancelled && (
         <div
           role="status"
@@ -1300,6 +1305,7 @@ export default function Tasks() {
         onPurchase={FIX_IT_PACKAGES ? purchaseFixIt : undefined}
         purchasing={fixItPurchasing}
         purchaseError={fixItError}
+        currentSubscription={fixItSubscription}
       />
 
       <BulkApproveModal

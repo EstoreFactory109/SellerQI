@@ -32,8 +32,11 @@ import axiosInstance from '../../../config/axios.config';
 import { detectCountry } from '../../../utils/countryDetection';
 import IndiaBilling from './IndiaBilling';
 import CancelSubscriptionModal from './CancelSubscription/CancelSubscriptionModal';
+import FixItSubscriptionCard, { useFixItSubscription } from '../../Tasks/FixItSubscriptionCard.jsx';
 
 export default function PlansAndBilling() {
+  // A monthly Fix it subscription (Tasks page) is billed apart from the plan; shown here too.
+  const { subscription: fixItSubscription, setSubscription: setFixItSubscription } = useFixItSubscription();
   // Country detection state
   const [country, setCountry] = useState(null);
   const [isDetectingCountry, setIsDetectingCountry] = useState(true);
@@ -422,6 +425,11 @@ export default function PlansAndBilling() {
   // Default billing page for other countries (Stripe)
   return (
     <div className="min-h-screen bg-[#1a1a1a]">
+      {fixItSubscription?.live && (
+        <div className="max-w-5xl mx-auto px-4 pt-4">
+          <FixItSubscriptionCard subscription={fixItSubscription} onChange={setFixItSubscription} />
+        </div>
+      )}
       {/* Cancel Success/Error Message */}
       {cancelMessage && (
         <motion.div 

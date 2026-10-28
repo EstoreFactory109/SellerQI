@@ -4,9 +4,15 @@
  * and a PRO seller's package shares their Stripe customer (a refund would mark the subscription
  * refunded).
  */
-jest.mock('stripe', () => () => ({}));
+const mockStripe = { subscriptions: { retrieve: jest.fn() } };
+jest.mock('stripe', () => () => mockStripe);
 jest.mock('../../../models/user-auth/SubscriptionModel', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
-jest.mock('../../../models/user-auth/userModel', () => ({}));
+jest.mock('../../../models/user-auth/userModel', () => ({ findByIdAndUpdate: jest.fn(), findById: jest.fn(), updateOne: jest.fn() }));
+jest.mock('../../../Services/Stripe/FixItSubscriptionService', () => ({
+  isFixIt: (sub) => sub?.metadata?.purchaseType === 'fixit',
+  handleSubscriptionEvent: jest.fn(),
+  recordRenewal: jest.fn(),
+}));
 jest.mock('../../../models/system/PaymentLogsModel', () => ({ isWebhookProcessed: jest.fn(), logWebhookEvent: jest.fn() }));
 jest.mock('../../../Services/Email/SendTrialToProSupportEmail', () => ({ sendTrialToProSupportEmail: jest.fn() }));
 jest.mock('../../../Services/Stripe/FixItCheckoutService', () => ({
@@ -19,6 +25,8 @@ jest.mock('../../../Services/Stripe/FixItCheckoutService', () => ({
 const Subscription = require('../../../models/user-auth/SubscriptionModel');
 const PaymentLogs = require('../../../models/system/PaymentLogsModel');
 const FixIt = require('../../../Services/Stripe/FixItCheckoutService');
+const User = require('../../../models/user-auth/userModel');
+const FixItSubs = require('../../../Services/Stripe/FixItSubscriptionService');
 const webhooks = require('../../../Services/Stripe/StripeWebhookService');
 
 const fixitSession = { id: 'cs_1', mode: 'payment', payment_status: 'paid', metadata: { userId: 'u1', purchaseType: 'fixit', packageId: 'trial' } };
@@ -54,4 +62,42 @@ it('a subscription refund still goes to the subscription code', async () => {
   Subscription.findOne.mockResolvedValue(null);
   await webhooks.handleWebhookEvent({ id: 'evt_4', type: 'charge.refunded', data: { object: { id: 'ch_2', customer: 'cus_2', amount: 100, amount_refunded: 100 } } });
   expect(Subscription.findOne).toHaveBeenCalledWith({ stripeCustomerId: 'cus_2' });
+});
+
+describe('Fix it subscriptions never reach the SellerQI plan', () => {
+  const fixitSub = { id: 'sub_f', status: 'canceled', customer: 'cus_1', metadata: { userId: 'u1', purchaseType: 'fixit', packageId: 'standard' } };
+
+  it.each(['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'customer.subscription.trial_will_end'])(
+    '%s goes to the Fix it service, not the plan', async (type) => {
+      await webhooks.handleWebhookEvent({ id: `evt_${type}`, type, data: { object: fixitSub } });
+      expect(FixItSubs.handleSubscriptionEvent).toHaveBeenCalledWith(fixitSub, `evt_${type}`);
+      // Deleting the plan subscription downgrades the seller to LITE; a Fix it one must not.
+      expect(Subscription.findOne).not.toHaveBeenCalled();
+      expect(Subscription.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it('a paid renewal invoice becomes a Fix it month, not a plan payment', async () => {
+    mockStripe.subscriptions.retrieve.mockResolvedValue(fixitSub);
+    const invoice = { id: 'in_2', billing_reason: 'subscription_cycle', parent: { subscription_details: { subscription: 'sub_f' } } };
+    await webhooks.handleWebhookEvent({ id: 'evt_inv', type: 'invoice.payment_succeeded', data: { object: invoice } });
+    expect(FixItSubs.recordRenewal).toHaveBeenCalledWith(invoice, fixitSub, 'evt_inv');
+    expect(Subscription.findOne).not.toHaveBeenCalled();
+    expect(Subscription.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('a failed renewal only refreshes the Fix it subscription', async () => {
+    mockStripe.subscriptions.retrieve.mockResolvedValue({ ...fixitSub, status: 'past_due' });
+    const invoice = { id: 'in_3', parent: { subscription_details: { subscription: 'sub_f' } } };
+    await webhooks.handleWebhookEvent({ id: 'evt_fail', type: 'invoice.payment_failed', data: { object: invoice } });
+    expect(FixItSubs.handleSubscriptionEvent).toHaveBeenCalledWith(expect.objectContaining({ status: 'past_due' }), 'evt_fail');
+    expect(Subscription.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('a plan subscription event still reaches the plan code', async () => {
+    Subscription.findOne.mockResolvedValue(null);
+    await webhooks.handleWebhookEvent({ id: 'evt_plan', type: 'customer.subscription.updated', data: { object: { id: 'sub_p', status: 'active', metadata: { userId: 'u1', planType: 'PRO' }, items: { data: [] } } } });
+    expect(FixItSubs.handleSubscriptionEvent).not.toHaveBeenCalled();
+  });
 });
