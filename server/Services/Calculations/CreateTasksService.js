@@ -1285,6 +1285,11 @@ class CreateTaskService {
                     if (m) t.fixIt = { state: m.state === 'open' ? 'with_team' : (m.closedBy === 'zoho' ? 'done_by_team' : 'closed') };
                 }
             }
+            // Completed by the team in Zoho (Fix it, or a closed Zoho task matched by
+            // ZohoCloseSync for a staff-added ESF client).
+            for (const t of tasks) {
+                if (t.completedBy === 'esf_team' && t.status === 'completed' && !t.fixIt) t.fixIt = { state: 'done_by_team' };
+            }
             const taskCounts = await TaskItem.countByStatus(userId, country, region);
 
             // The same issue-type groups the Dashboard's "Top things to fix" shows,
@@ -1380,6 +1385,14 @@ class CreateTaskService {
             
             if (!task) {
                 throw new Error('Task not found');
+            }
+
+            // Un-ticking something the team's closed Zoho task had marked done: note it, so the
+            // matching can be judged (ESF portal → Auto-closed tasks).
+            if (status !== 'completed') {
+                Promise.resolve()
+                    .then(() => require('../Zoho/ZohoCloseSync.js').noteUndone(userId, taskId))
+                    .catch((error) => logger.warn(`[updateTaskStatus] undo not noted for ${taskId}: ${error.message}`));
             }
 
             // Mirrored as a Fix it subtask? Close / reopen it in Zoho now, not at the next sweep.

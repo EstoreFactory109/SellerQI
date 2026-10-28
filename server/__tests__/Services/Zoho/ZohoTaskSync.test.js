@@ -25,6 +25,8 @@ jest.mock('../../../models/user-auth/userModel.js', () => ({ find: jest.fn(), fi
 const mockFixIt = { orders: [], subtaskCount: 0 };
 jest.mock('../../../models/system/FixItWorkOrderModel.js', () => ({ find: () => ({ select: () => ({ lean: async () => mockFixIt.orders }) }) }));
 jest.mock('../../../models/system/FixItSubtaskModel.js', () => ({ countDocuments: async () => mockFixIt.subtaskCount }));
+const mockCloseSync = { calls: [] };
+jest.mock('../../../Services/Zoho/ZohoCloseSync.js', () => ({ handleClosedTasks: async (args) => { mockCloseSync.calls.push(args); return {}; } }));
 jest.mock('../../../models/system/ZohoProjectTaskModel.js', () => ({
     find: jest.fn(),
     bulkWrite: jest.fn().mockResolvedValue({}),
@@ -520,5 +522,30 @@ describe('Fix it work orders on the Status page', () => {
         expect(opts.skipCommentsFor({ parentTaskId: 'PARENT' })).toBe(true);
         expect(opts.skipCommentsFor({ parentTaskId: 'OTHER' })).toBe(false);
         expect(opts.skipCommentsFor({ parentTaskId: null })).toBe(false);
+    });
+});
+
+describe('Zoho tasks the team closed (staff-added ESF clients)', () => {
+    afterEach(() => { mockFixIt.orders = []; });
+    const zTask = (over) => ({ id: 'z', name: 'Task', statusIsClosed: false, isCompleted: false, comments: [], ...over });
+
+    test('only tasks that went from open to closed are passed on — never ones first seen closed, Fix it ones or Untapped', async () => {
+        mockFixIt.orders = [{ _id: 'wo1', zohoParentTaskId: 'FIXPARENT' }];
+        ZohoProjectsService.getProjectTaskUpdates.mockResolvedValue({ tasks: [
+            zTask({ id: 'JUST_CLOSED', statusIsClosed: true }),
+            zTask({ id: 'STILL_OPEN' }),
+            zTask({ id: 'FIRST_SEEN_CLOSED', isCompleted: true }),
+            zTask({ id: 'FIX_SUB', statusIsClosed: true, parentTaskId: 'FIXPARENT' }),
+            zTask({ id: 'UNTAPPED', statusIsClosed: true, tasklist: 'Untapped' }),
+        ] });
+        ZohoProjectTask.find.mockReturnValue({ select: () => ({ lean: async () => [
+            { taskId: 'JUST_CLOSED', statusIsClosed: false, isCompleted: false },
+            { taskId: 'STILL_OPEN', statusIsClosed: false },
+            { taskId: 'FIX_SUB', statusIsClosed: false },
+            { taskId: 'UNTAPPED', statusIsClosed: false },
+        ] }), lean: async () => [] });
+        await Sync.syncProject({ projectId: 'p1', projectName: 'Acme', portalId: 'portal' });
+        expect(mockCloseSync.calls).toHaveLength(1);
+        expect(mockCloseSync.calls[0].closedTasks.map((t) => t.id)).toEqual(['JUST_CLOSED']);
     });
 });

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
-import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2, MessageSquare, ClipboardList, Radio } from 'lucide-react';
+import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2, MessageSquare, ClipboardList, Radio, ListChecks } from 'lucide-react';
 import { canViewClientActivity } from '../utils/esfActivityAccess.js';
 import axiosInstance from '../config/axios.config.js';
 import { useEsfUser } from '../contexts/EsfUserContext.js';
@@ -13,6 +13,7 @@ const PAGE_TITLES = {
   '/esf/messages': { title: 'Messages', subtitle: 'Client conversations — shown by project, never by name' },
   '/esf/task-requests': { title: 'Task requests', subtitle: 'Work clients have asked for — accepting creates the task in Zoho' },
   '/esf/activity': { title: 'Client activity', subtitle: 'Which clients are using SellerQI right now, and what they look at' },
+  '/esf/auto-closed': { title: 'Auto-closed tasks', subtitle: 'Zoho tasks the team closed, and the client tasks SellerQI matched to them' },
   '/esf/settings': { title: 'Settings', subtitle: 'Your profile and preferences' },
 };
 
@@ -102,6 +103,12 @@ const EsfLayout = () => {
             <NavLink to="/esf/activity" className={({ isActive }) => navItemClass(isActive)}>
               <Radio className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Client activity</span>
+            </NavLink>
+            )}
+            {canViewClientActivity(esfUser) && (
+            <NavLink to="/esf/auto-closed" className={({ isActive }) => navItemClass(isActive)}>
+              <ListChecks className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">Auto-closed tasks</span>
             </NavLink>
             )}
           </nav>

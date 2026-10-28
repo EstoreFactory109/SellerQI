@@ -148,6 +148,7 @@ const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 // Billing history — purged only for an admin's manual delete, see below.
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
+const ZohoCloseMatch = require('../../models/system/ZohoCloseMatchModel.js');
 const FixItPurchase = require('../../models/system/FixItPurchaseModel.js');
 const FixItSubscription = require('../../models/system/FixItSubscriptionModel.js');
 const FixItWorkOrder = require('../../models/system/FixItWorkOrderModel.js');
@@ -246,6 +247,8 @@ const collectionsWithUserId = [
     { model: UserUpdateSchedule, key: 'userId' },
     { model: Task, key: 'userId' },
     { model: TaskItem, key: 'userId' },
+    // Zoho tasks the team closed, matched to this seller's tasks (ZohoCloseSync).
+    { model: ZohoCloseMatch, key: 'userId' },
     { model: IssuesDataChunks, key: 'userId' },
     { model: IssuesData, key: 'userId' },
     { model: IssueSummary, key: 'userId' },

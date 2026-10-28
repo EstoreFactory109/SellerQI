@@ -127,7 +127,7 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
     // summary instead of paying to regenerate identical text.
     const existing = tasks.length
         ? await ZohoProjectTask.find({ projectId, taskId: { $in: tasks.map((t) => t.id) } })
-            .select('taskId commentSummary waitingOnClient team deliverableDecisions').lean()
+            .select('taskId commentSummary waitingOnClient team deliverableDecisions statusIsClosed isCompleted').lean()
         : [];
     const priorByTask = new Map(existing.map((row) => [row.taskId, {
         ...(row.commentSummary || {}),
@@ -138,6 +138,7 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
     // Bounded concurrency: these are network calls to OpenAI, and a 200-task
     // project firing them all at once would hit rate limits rather than finish
     // faster.
+    // Null for Fix it subtasks (no summary is made for them): every reader below allows for it.
     const summaries = await mapWithConcurrency(tasks, SUMMARY_CONCURRENCY, async (task) => {
         if (isFixItSubtask(task)) return null;
         const prior = priorByTask.get(task.id) || {};
@@ -253,6 +254,25 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
         );
     }
 
+    // Tasks the team closed since the last sync: their SellerQI counterparts are marked done
+    // (ZohoCloseSync; dry run until ZOHO_CLOSE_MATCH_MODE=on). Only open -> closed, so a task
+    // first seen already closed — all of history, on the first run — never fires. Never fails
+    // the sync.
+    try {
+        const wasOpen = new Map(existing.map((row) => [row.taskId, !(row.statusIsClosed || row.isCompleted)]));
+        const closedTasks = tasks.filter((t) => (t.statusIsClosed || t.isCompleted)
+            && wasOpen.get(t.id) === true
+            && !isFixItSubtask(t)
+            && !fixItParents.ids.has(String(t.id))
+            && String(t.tasklist || '').trim().toLowerCase() !== UNTAPPED_TASKLIST);
+        if (closedTasks.length) {
+            const ZohoCloseSync = require('./ZohoCloseSync.js');
+            await ZohoCloseSync.handleClosedTasks({ projectId, portalId: portalId || updates.portalId, closedTasks });
+        }
+    } catch (error) {
+        logger.warn(`[ZohoTaskSync] closed-task matching failed for ${projectId}: ${error.message}`);
+    }
+
     // Drop rows for tasks deleted in Zoho, so the page cannot show work that no
     // longer exists. Scoped to this project only.
     const liveIds = tasks.map((t) => t.id);
@@ -271,9 +291,9 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
         suggested,
         untapped,
         comments: tasks.reduce((sum, t) => sum + (t.comments?.length || 0), 0),
-        summarised: summaries.filter((s) => s.generatedBy === 'ai').length,
-        waitingOnClient: summaries.filter((s) => s.waitingOnClient).length,
-        summariesReused: summaries.filter((s) => s.reused).length,
+        summarised: summaries.filter((s) => s?.generatedBy === 'ai').length,
+        waitingOnClient: summaries.filter((s) => s?.waitingOnClient).length,
+        summariesReused: summaries.filter((s) => s?.reused).length,
         removed: removed.deletedCount || 0,
         truncated: Boolean(updates.truncated),
     };

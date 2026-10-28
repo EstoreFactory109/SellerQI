@@ -23,6 +23,7 @@ jest.mock('../../../models/MCP/TaskItemModel.js', () => ({
 jest.mock('../../../utils/mongoLock.js', () => ({ acquireLock: jest.fn() }));
 // Fix it work orders (Zoho subtasks) are their own suite; here they must stay out of the way.
 jest.mock('../../../models/system/FixItSubtaskModel.js', () => ({ find: () => ({ select: () => ({ lean: async () => [] }) }) }));
+jest.mock('../../../Services/Zoho/ZohoCloseSync.js', () => ({ noteUndone: async () => {} }));
 jest.mock('../../../Services/Stripe/FixItZohoSync.js', () => ({ syncInBackground: () => {}, syncForTask: async () => null, syncForMarketplace: async () => [] }));
 
 const Task = require('../../../models/MCP/TaskModel.js');

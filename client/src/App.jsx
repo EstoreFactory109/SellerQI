@@ -51,6 +51,7 @@ import ConnectAccounts from './Pages/Onboarding/ConnectAccounts.jsx';
 import ConnectMarketplaces from './Pages/Onboarding/ConnectMarketplaces.jsx';
 import AdminActivity from './Pages/Admin/AdminActivity.jsx';
 import EsfActivity from './Pages/ESF/EsfActivity.jsx';
+import EsfCloseMatches from './Pages/ESF/EsfCloseMatches.jsx';
 import ProfileIDSelection from './Pages/Onboarding/ProfileIDSeclection.jsx';
 import PaymentCancel from './Pages/Payment/PaymentCancel.jsx';
 import PaymentFailed from './Pages/Payment/PaymentFailed.jsx';
@@ -222,6 +223,7 @@ const App = () => {
             <Route path='messages' element={<EsfMessages />} />
             <Route path='task-requests' element={<EsfTaskRequests />} />
             <Route path='activity' element={<EsfActivity />} />
+            <Route path='auto-closed' element={<EsfCloseMatches />} />
             <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
