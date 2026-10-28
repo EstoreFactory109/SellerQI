@@ -5,6 +5,8 @@ const User = require('../../models/user-auth/userModel');
 const PaymentLogs = require('../../models/system/PaymentLogsModel');
 const logger = require('../../utils/Logger');
 const { sendTrialToProSupportEmail } = require('../Email/SendTrialToProSupportEmail');
+const FixItCheckoutService = require('./FixItCheckoutService');
+const FixItSubscriptionService = require('./FixItSubscriptionService');
 
 class StripeWebhookService {
     constructor() {
@@ -165,6 +167,13 @@ class StripeWebhookService {
      */
     async handleCheckoutSessionCompleted(session, webhookEventId = null) {
         try {
+            // A "Fix it" package (one-time payment) has no planType and must never touch the
+            // subscription — handled entirely by FixItCheckoutService.
+            if (session.metadata?.purchaseType === FixItCheckoutService.PURCHASE_TYPE) {
+                await FixItCheckoutService.completeFixItPurchase(session, { source: 'WEBHOOK', webhookEventId });
+                return;
+            }
+
             const userId = session.metadata?.userId;
             const planType = session.metadata?.planType;
 
@@ -297,6 +306,12 @@ class StripeWebhookService {
      */
     async handleSubscriptionCreated(subscription, webhookEventId = null) {
         try {
+            // A Fix it subscription (Tasks page) is not the SellerQI plan: handled apart, so its
+            // ending can never downgrade the seller or its renewals be booked as plan payments.
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             const userId = subscription.metadata?.userId;
             const planType = subscription.metadata?.planType;
 
@@ -406,6 +421,12 @@ class StripeWebhookService {
      */
     async handleSubscriptionUpdated(subscription, webhookEventId = null) {
         try {
+            // A Fix it subscription (Tasks page) is not the SellerQI plan: handled apart, so its
+            // ending can never downgrade the seller or its renewals be booked as plan payments.
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             const userId = subscription.metadata?.userId;
             const planType = subscription.metadata?.planType;
 
@@ -505,6 +526,12 @@ class StripeWebhookService {
      */
     async handleSubscriptionDeleted(subscription, webhookEventId = null) {
         try {
+            // A Fix it subscription (Tasks page) is not the SellerQI plan: handled apart, so its
+            // ending can never downgrade the seller or its renewals be booked as plan payments.
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             const userId = subscription.metadata?.userId;
 
             // Validate required metadata
@@ -563,6 +590,11 @@ class StripeWebhookService {
 
             // Get subscription from Stripe to get metadata
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                // A paid month of a Fix it subscription: its own Zoho task and support email.
+                await FixItSubscriptionService.recordRenewal(invoice, subscription, webhookEventId);
+                return;
+            }
             let userId = subscription.metadata?.userId;
             let planType = subscription.metadata?.planType;
 
@@ -753,6 +785,11 @@ class StripeWebhookService {
 
             // Get subscription from Stripe to get metadata and status
             const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                // Stripe retries the card itself; the subscription's status (past_due) is all we track.
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             let userId = subscription.metadata?.userId;
             let planType = subscription.metadata?.planType;
 
@@ -873,6 +910,12 @@ class StripeWebhookService {
      */
     async handleTrialWillEnd(subscription, webhookEventId = null) {
         try {
+            // A Fix it subscription (Tasks page) is not the SellerQI plan: handled apart, so its
+            // ending can never downgrade the seller or its renewals be booked as plan payments.
+            if (FixItSubscriptionService.isFixIt(subscription)) {
+                await FixItSubscriptionService.handleSubscriptionEvent(subscription, webhookEventId);
+                return;
+            }
             const userId = subscription.metadata?.userId;
             const planType = subscription.metadata?.planType;
 
@@ -916,6 +959,8 @@ class StripeWebhookService {
      */
     async handleCheckoutSessionExpired(session, webhookEventId = null) {
         try {
+            if (await FixItCheckoutService.expireFixItCheckout(session)) return;
+
             const userId = session.metadata?.userId;
             const planType = session.metadata?.planType;
 
@@ -993,6 +1038,10 @@ class StripeWebhookService {
             const isFullRefund = amountRefunded >= amountTotal;
 
             logger.info(`Charge refunded: ${chargeId}, customer: ${customerId}, refunded: ${amountRefunded}, total: ${amountTotal}, fullRefund: ${isFullRefund}`);
+
+            // A refunded Fix it package shares the Stripe customer with a PRO seller's
+            // subscription; it must not mark that subscription refunded.
+            if (await FixItCheckoutService.handleFixItRefund(charge, webhookEventId)) return;
 
             // Find subscription by customer ID
             const dbSubscription = await Subscription.findOne({ stripeCustomerId: customerId });

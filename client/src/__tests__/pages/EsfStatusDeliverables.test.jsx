@@ -125,4 +125,17 @@ describe('Status page deliverables', () => {
     expect(screen.queryByText('Delivered')).not.toBeInTheDocument();
     expect(screen.getByText('Has attachments in Zoho')).toBeInTheDocument();
   });
+
+  it('a Fix it task shows how many of the seller\'s tasks are done, and lists them when opened', async () => {
+    axiosInstance.get.mockImplementation(async (url) => (url === '/api/pagewise/esf/project-status'
+      ? respond(board({ inProgress: [task({ id: 'FX', name: 'Fix it – Standard subscription (30 tasks a month)', deliverables: [], summary: null,
+          fixIt: { done: 1, total: 2, subtasks: [{ id: 'S1', name: 'Selling at a loss — Blue Mug', done: false }, { id: 'S2', name: 'A+ missing — Red Mug', done: true }] } })] }))
+      : { data: new Blob(['img']) }));
+    render(<Status />);
+    expect(await screen.findByText('1 of 2 done')).toBeInTheDocument();
+    await openTask('Fix it – Standard subscription (30 tasks a month)');
+    expect(screen.getByText(/Your tasks in this package — 1 of 2 done/)).toBeInTheDocument();
+    expect(screen.getByText('Selling at a loss — Blue Mug')).toBeInTheDocument();
+    expect(screen.getByText('A+ missing — Red Mug')).toBeInTheDocument();
+  });
 });

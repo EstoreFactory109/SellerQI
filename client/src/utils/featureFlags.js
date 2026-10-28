@@ -16,7 +16,8 @@ export const ALL_MARKETPLACES_DASHBOARD = PER_PAGE_MARKETPLACE && import.meta.en
 
 /**
  * VITE_FIX_IT_PACKAGES — the Tasks page's "Fix it now" / "Have us fix these" buttons and the
- * price line that sells them. Off until the Fix it packages are ready to offer; the rest of the
- * Tasks page (what the open tasks cost, the account risks) shows either way.
+ * price line that sells them; buying goes through Stripe Checkout. ON by default (2026-10-27);
+ * set it to 'false' to hide them again. The rest of the Tasks page (what the open tasks cost,
+ * the account risks) shows either way.
  */
-export const FIX_IT_PACKAGES = import.meta.env.VITE_FIX_IT_PACKAGES === 'true';
+export const FIX_IT_PACKAGES = import.meta.env.VITE_FIX_IT_PACKAGES !== 'false';

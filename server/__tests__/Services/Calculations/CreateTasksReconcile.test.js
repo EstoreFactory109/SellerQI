@@ -21,6 +21,10 @@ jest.mock('../../../models/MCP/TaskItemModel.js', () => ({
     reconcileWrite: jest.fn()
 }));
 jest.mock('../../../utils/mongoLock.js', () => ({ acquireLock: jest.fn() }));
+// Fix it work orders (Zoho subtasks) are their own suite; here they must stay out of the way.
+jest.mock('../../../models/system/FixItSubtaskModel.js', () => ({ find: () => ({ select: () => ({ lean: async () => [] }) }) }));
+jest.mock('../../../Services/Zoho/ZohoCloseSync.js', () => ({ noteUndone: async () => {} }));
+jest.mock('../../../Services/Stripe/FixItZohoSync.js', () => ({ syncInBackground: () => {}, syncForTask: async () => null, syncForMarketplace: async () => [] }));
 
 const Task = require('../../../models/MCP/TaskModel.js');
 const TaskItem = require('../../../models/MCP/TaskItemModel.js');
@@ -234,7 +238,8 @@ describe('updateTaskStatus', () => {
 
         const update = TaskItem.findOneAndUpdate.mock.calls[0][1];
         expect(update.$set.status).toBe('pending');
-        expect(update.$unset).toEqual({ completedAt: '' });
+        // Reopened by the seller: also no longer "done by the ESF team".
+        expect(update.$unset).toEqual({ completedAt: '', completedBy: '' });
     });
 });
 

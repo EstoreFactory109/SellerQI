@@ -55,6 +55,48 @@ class StripeService {
     }
 
     /**
+     * Buy a "Fix it" package: the server prices it and returns a Stripe Checkout URL, which we
+     * go to. The context (open tasks, what they are worth) is passed on to the support team.
+     */
+    async startFixItCheckout({ packageId, openTasks, monthlyRecoverable, atStakeCurrency }) {
+        const response = await axiosInstance.post('/app/stripe/fix-it/checkout', {
+            packageId, openTasks, monthlyRecoverable, atStakeCurrency,
+        });
+        window.location.href = response.data.data.url;
+        return response.data.data;
+    }
+
+    /** The seller's Fix it subscription (Standard/Accelerated), or null. */
+    async getFixItSubscription() {
+        const response = await axiosInstance.get('/app/stripe/fix-it/subscription');
+        return response.data.data;
+    }
+
+    /** Cancel at the end of the paid month. Returns the updated subscription. */
+    async cancelFixItSubscription() {
+        const response = await axiosInstance.post('/app/stripe/fix-it/subscription/cancel');
+        return response.data.data;
+    }
+
+    /** Undo a cancellation before the month ends. */
+    async resumeFixItSubscription() {
+        const response = await axiosInstance.post('/app/stripe/fix-it/subscription/resume');
+        return response.data.data;
+    }
+
+    /** Stripe's portal, to update the card the subscription is charged to. */
+    async openFixItBillingPortal() {
+        const response = await axiosInstance.post('/app/stripe/fix-it/subscription/portal');
+        window.location.href = response.data.data.url;
+    }
+
+    /** After Stripe sends the seller back: { status: 'paid'|'processing', purchase? }. */
+    async confirmFixItPurchase(sessionId) {
+        const response = await axiosInstance.get('/app/stripe/fix-it/confirm', { params: { session_id: sessionId } });
+        return response.data.data;
+    }
+
+    /**
      * Handle payment success
      */
     async handlePaymentSuccess(sessionId) {

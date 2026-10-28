@@ -119,3 +119,28 @@ describe('before the user has loaded', () => {
         expect(screen.queryByText('ORDINARY DASHBOARD')).not.toBeInTheDocument();
     });
 });
+
+describe('a past Fix it buyer (back to a normal seller)', () => {
+    const at = (path, guard) => render(
+        <Provider store={storeWith({ isEsfClient: false, fixItHistory: true })}>
+            <MemoryRouter initialEntries={[path]}>
+                <Routes>
+                    <Route element={guard}>
+                        <Route path={path} element={<div>ESF PAGE</div>} />
+                    </Route>
+                    <Route path="/seller-central-checker/dashboard" element={<div>DASHBOARD</div>} />
+                </Routes>
+            </MemoryRouter>
+        </Provider>
+    );
+
+    it('keeps the Status page (their history)', () => {
+        at('/seller-central-checker/estore-factory/status', <EsfClientOnlyRoute allowFixItHistory />);
+        expect(screen.getByText('ESF PAGE')).toBeInTheDocument();
+    });
+
+    it('but not the other ESF pages', () => {
+        at('/seller-central-checker/estore-factory/messages', <EsfClientOnlyRoute />);
+        expect(screen.getByText('DASHBOARD')).toBeInTheDocument();
+    });
+});

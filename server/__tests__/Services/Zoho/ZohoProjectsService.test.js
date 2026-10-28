@@ -644,6 +644,46 @@ describe('createTask — the one retry in the other date dialect', () => {
 
         expect(axios).toHaveBeenCalledTimes(1);
     });
+
+    test('v3 gets the tasklist as an object, not tasklist_id', async () => {
+        axios.mockResolvedValueOnce({ data: okTask });
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Filed', tasklistId: 'L1' });
+        expect(axios.mock.calls[0][0].data.tasklist).toEqual({ id: 'L1' });
+        expect(axios.mock.calls[0][0].data).not.toHaveProperty('tasklist_id');
+    });
+
+    test('live 2026-10-28: a refused tasklist is dropped and the ISO dates are KEPT', async () => {
+        // The old replay also switched the correct ISO dates to MM-DD-YYYY, which v3
+        // refused with PATTERN_NOT_MATCHED on start_date — so the task was never created.
+        axios.mockRejectedValueOnce(httpError(400, { error: {
+            title: 'INVALID_PARAMETER_VALUE', error_type: 'FIELDS_VALIDATION_ERROR',
+            details: [{ message: 'Enter a valid custom field.', field_name: 'tasklist_id' }],
+        } })).mockResolvedValueOnce({ data: okTask });
+
+        const task = await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Fix it', tasklistId: 'L1', endDate: '2099-12-31' });
+
+        const retry = axios.mock.calls[1][0].data;
+        expect(retry).not.toHaveProperty('tasklist');
+        expect(retry).not.toHaveProperty('tasklist_id');
+        expect(retry.end_date).toBe('2099-12-31T12:00:00.000Z');
+        expect(task.id).toBe('task-9');
+    });
+
+    test('a refused date keeps the tasklist and only switches the dates', async () => {
+        axios.mockRejectedValueOnce(formatRejection()).mockResolvedValueOnce({ data: okTask });
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Fix it', tasklistId: 'L1', endDate: '2099-12-31' });
+        const retry = axios.mock.calls[1][0].data;
+        expect(retry.end_date).toBe('12-31-2099');
+        expect(retry.tasklist).toEqual({ id: 'L1' });
+    });
+
+    test('a refused field we cannot fix (e.g. name) is not retried', async () => {
+        axios.mockRejectedValue(httpError(400, { error: {
+            title: 'PATTERN_NOT_MATCHED', details: [{ message: 'bad', field_name: 'name' }],
+        } }));
+        await expect(ZohoProjectsService.createTask({ projectId: 'p1', name: 'x', tasklistId: 'L1', endDate: '2099-12-31' })).rejects.toThrow();
+        expect(axios).toHaveBeenCalledTimes(1);
+    });
 });
 
 describe('createTask — the status a new task lands in', () => {
@@ -783,5 +823,48 @@ describe('createTasklist', () => {
     test('an empty name never reaches Zoho', async () => {
         await expect(ZohoProjectsService.createTasklist({ projectId: 'p1', name: '   ' })).rejects.toThrow();
         expect(axios).not.toHaveBeenCalled();
+    });
+});
+
+describe('subtasks and task updates — the shapes probed live on 2026-10-28', () => {
+    const okTask = (over = {}) => ({ id: 'S1', name: 'Sub', parental_info: { parent_task_id: 'P1' }, status: { id: 'ST_OPEN', name: 'Open', is_closed_type: false }, ...over });
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({ apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1' });
+    });
+    const call = (i = 0) => axios.mock.calls[i][0];
+
+    test('createSubtask: v3 POST to the task list with parental_info (the /subtasks path is not configured)', async () => {
+        axios.mockResolvedValueOnce({ data: okTask() });
+        const sub = await ZohoProjectsService.createSubtask({ projectId: 'p1', parentTaskId: 'P1', name: ' Fix price ', description: 'why' });
+        expect(call().method).toBe('POST');
+        expect(call().url).toBe('https://projectsapi.zoho.com/api/v3/portal/portal-1/projects/p1/tasks');
+        expect(call().data).toEqual({ name: 'Fix price', description: 'why', parental_info: { parent_task_id: 'P1' } });
+        expect(sub).toMatchObject({ id: 'S1', parentTaskId: 'P1', statusId: 'ST_OPEN', statusIsClosed: false });
+    });
+
+    test('listSubtasks: the flat v3 list filtered to the parent', async () => {
+        axios.mockResolvedValueOnce({ data: { tasks: [okTask(), okTask({ id: 'S2', parental_info: { parent_task_id: 'OTHER' } }), okTask({ id: 'TOP', parental_info: undefined })] } });
+        const subs = await ZohoProjectsService.listSubtasks({ projectId: 'p1', parentTaskId: 'P1' });
+        expect(subs.map((s) => s.id)).toEqual(['S1']);
+    });
+
+    test('updateTask: v3 PATCH with only the fields given; status by id', async () => {
+        axios.mockResolvedValueOnce({ data: okTask() });
+        await ZohoProjectsService.updateTask({ projectId: 'p1', taskId: 'S1', name: 'New', statusId: 'ST_OPEN' });
+        expect(call().method).toBe('PATCH');
+        expect(call().url).toBe('https://projectsapi.zoho.com/api/v3/portal/portal-1/projects/p1/tasks/S1');
+        expect(call().data).toEqual({ name: 'New', status: { id: 'ST_OPEN' } });
+    });
+
+    test('closeTask: v2 percent_complete=100, form-encoded; reopenTask: v3 PATCH to an open status id', async () => {
+        axios.mockResolvedValue({ data: { tasks: [] } });
+        await ZohoProjectsService.closeTask({ projectId: 'p1', taskId: 'S1' });
+        expect(call().url).toBe('https://projectsapi.zoho.com/restapi/portal/portal-1/projects/p1/tasks/S1/');
+        expect(String(call().data)).toBe('percent_complete=100');
+        await ZohoProjectsService.reopenTask({ projectId: 'p1', taskId: 'S1', openStatusId: 'ST_OPEN' });
+        expect(call(1)).toMatchObject({ method: 'PATCH', data: { status: { id: 'ST_OPEN' } } });
+        await expect(ZohoProjectsService.reopenTask({ projectId: 'p1', taskId: 'S1' })).rejects.toMatchObject({ statusCode: 400 });
     });
 });

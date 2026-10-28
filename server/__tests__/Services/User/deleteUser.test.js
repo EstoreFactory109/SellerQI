@@ -43,7 +43,7 @@ const INTENTIONALLY_EXCLUDED = {
 };
 
 /** Purged only when the caller passes includeBillingHistory (admin manual delete). */
-const BILLING_HISTORY_MODELS = ['SubscriptionModel.js', 'PaymentLogsModel.js'];
+const BILLING_HISTORY_MODELS = ['SubscriptionModel.js', 'PaymentLogsModel.js', 'FixItPurchaseModel.js', 'FixItSubscriptionModel.js', 'FixItWorkOrderModel.js', 'FixItSubtaskModel.js'];
 
 const listFiles = (dir) =>
     fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

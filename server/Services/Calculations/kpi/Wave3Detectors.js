@@ -9,11 +9,10 @@
  * Same contract as Wave1Detectors: pure, `now` injected, `{ tasks, covered }`.
  */
 
-const crypto = require('crypto');
 const R = require('./KpiRules.js');
+const { listingIssueGroupKey, listingGroupEntity } = require('../TaskIdentity.js');
 
 const PENDING = 'pending';
-const hashOf = (text) => crypto.createHash('sha1').update(String(text)).digest('hex').slice(0, 16);
 const nameOf = (productsByAsin, asin) => {
     const p = productsByAsin.get(asin);
     return (p?.itemName || p?.title || p?.productName || asin || 'Unknown Product').substring(0, 100);
@@ -41,43 +40,48 @@ const num = (v) => {
 function detectListingIssues({ products = [], productsByAsin = new Map(), severity, errorCategory, errorType, text, skip = () => false }) {
     const synced = (products || []).some(p => Array.isArray(p?.listingIssues));
     if (!synced) return { tasks: [], covered: false };
+    // Issues are grouped by Amazon's issue code (+ the attributes it names), not by the
+    // message text: Amazon rewords and re-localises messages, and a reworded message
+    // used to be a new task, so a group the seller had completed came back as pending.
     const byAsin = new Map();
-    const asinsByMessage = new Map();
+    const asinsByGroup = new Map(); // groupKey -> { asins, message }
     for (const p of products || []) {
         if (!p?.asin || !Array.isArray(p.listingIssues)) continue;
         const issues = p.listingIssues.filter(i => String(i?.severity || '').toUpperCase() === severity && !skip(i));
         if (issues.length === 0) continue;
-        const e = byAsin.get(p.asin) || { skus: new Set(), messages: new Set() };
+        const e = byAsin.get(p.asin) || { skus: new Set(), messages: new Map() };
         e.skus.add(p.sku);
         for (const w of issues) {
             if (!w.message) continue;
             const message = String(w.message).trim();
-            e.messages.add(message);
-            const set = asinsByMessage.get(message) || new Set();
-            set.add(p.asin);
-            asinsByMessage.set(message, set);
+            const groupKey = listingIssueGroupKey(w);
+            if (!e.messages.has(groupKey)) e.messages.set(groupKey, message);
+            const group = asinsByGroup.get(groupKey) || { asins: new Set(), message };
+            group.asins.add(p.asin);
+            asinsByGroup.set(groupKey, group);
         }
         byAsin.set(p.asin, e);
     }
 
-    const grouped = new Set([...asinsByMessage].filter(([, asins]) => asins.size >= R.LISTING_WARNING_GROUP_MIN).map(([m]) => m));
+    const grouped = new Set([...asinsByGroup].filter(([, g]) => g.asins.size >= R.LISTING_WARNING_GROUP_MIN).map(([k]) => k));
     const tasks = [];
-    for (const message of grouped) {
-        const asins = [...asinsByMessage.get(message)];
+    for (const groupKey of grouped) {
+        const { message } = asinsByGroup.get(groupKey);
+        const asins = [...asinsByGroup.get(groupKey).asins];
         tasks.push({
-            asin: `${severity}:${hashOf(message)}`,
+            asin: listingGroupEntity(severity, groupKey),
             productName: `${asins.length} listings`,
             errorCategory,
             errorType,
             error: `${text.label}: Amazon has the same ${text.noun} on ${asins.length} of your listings: ${message}`,
             solution: 'This is one issue repeated across listings, so fix it once at the source: upload or correct the document or attribute Amazon asks for (Seller Central > Account Health or Inventory > Fix Your Listings), then check a few of the listings below.',
-            renderData: { listings: asins.length, asins: asins.slice(0, 50), messages: [message] },
+            renderData: { listings: asins.length, asins: asins.slice(0, 50), messages: [message], groupKey },
             status: PENDING
         });
     }
 
     for (const [asin, e] of byAsin) {
-        const messages = [...e.messages].filter(m => !grouped.has(m));
+        const messages = [...e.messages].filter(([k]) => !grouped.has(k)).map(([, m]) => m);
         if (messages.length === 0) continue;
         tasks.push({
             asin,

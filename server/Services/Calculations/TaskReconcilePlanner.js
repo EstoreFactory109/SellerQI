@@ -23,9 +23,19 @@
  *   not detected, stored, open      -> resolved, IF its data source was covered this
  *                                      run and the mass-resolve rail did not trip
  *   not detected, stored, done      -> purged after DONE_RETENTION_DAYS
+ *
+ * "Stored" means the same identity (TaskIdentity.identityKeyOf), not the same label: a
+ * problem whose errorType moves with its state (unstable <-> sustained, low stock <-> out
+ * of stock, too long <-> too short ...) stays one row, its type and text updated in place.
+ * A completed task whose problem got WORSE (severityRank up) reopens at once.
  */
+const { identityKeyOf, severityRank } = require('./TaskIdentity.js');
 
 const COMPLETED_GRACE_DAYS = 7;
+// Work the ESF team closed (a Fix it subtask closed in Zoho) waits at least this long before a
+// still-detected issue reopens it: many fixes take weeks to show on Amazon (account health is
+// averaged over 60-90 days), and reopening sooner sends the team back to work they already did.
+const TEAM_MIN_GRACE_DAYS = 30;
 const DONE_RETENTION_DAYS = 30;
 // lastSeenAt is diagnostic; touching it on every run would rewrite every task of
 // a 25k-task account each time. Refresh it at most this often when nothing else changed.
@@ -122,8 +132,22 @@ function coverageSourceFor(category, errorType) {
     return SOURCE_BY_TYPE[`${category}:${errorType}`] || category;
 }
 
-/** Identity within one marketplace; mirrors the task_dedup_marketplace index. */
-const taskKey = (t) => `${t.asin}\u0000${t.errorCategory}\u0000${t.errorType}`;
+/**
+ * Identity within one marketplace; mirrors the task_identity_marketplace index. A stored
+ * identityKey wins (the migration may have set one the fields alone would not derive,
+ * e.g. a listing group re-keyed from its message to Amazon's issue code).
+ */
+const taskKey = (t) => t.identityKey || identityKeyOf(t);
+
+// Which of two stored rows with one identity is "the" task (rows written before identities
+// existed can share one): the seller's own decision first, then the newest.
+const KEEP_ORDER = { completed: 4, in_progress: 3, pending: 2, resolved: 1 };
+const preferStored = (a, b) => {
+    const d = (KEEP_ORDER[a.status] || 0) - (KEEP_ORDER[b.status] || 0);
+    if (d !== 0) return d > 0 ? a : b;
+    const t = (x) => new Date(x.completedAt || x.updatedAt || x.createdAt || 0).getTime();
+    return t(b) > t(a) ? b : a;
+};
 
 /**
  * Comparable form of a value: drops null/undefined (Mongo stores an undefined
@@ -193,6 +217,7 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
         touched: 0,
         reopened: 0,
         stillDetected: 0,
+        escalated: 0,
         resolved: 0,
         purged: 0,
         uncoveredSources: [],
@@ -205,10 +230,12 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
 
     const existingByKey = new Map();
     for (const t of existing) {
-        // A duplicate key can only exist for rows written before the dedup index;
-        // keep the first and leave the rest alone.
+        // Several rows can share an identity when they were written under different
+        // labels before identities existed. Keep the one carrying the seller's decision;
+        // the others are then "not detected" and resolve / purge like any vanished task.
         const k = taskKey(t);
-        if (!existingByKey.has(k)) existingByKey.set(k, t);
+        const held = existingByKey.get(k);
+        existingByKey.set(k, held ? preferStored(held, t) : t);
         if (OPEN_STATUSES.has(t.status)) {
             summary.openCountBefore++;
             summary.openAmountBefore += Number(t.amount) || 0;
@@ -237,6 +264,7 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
                         country: scope.country,
                         region: scope.region,
                         taskId: want.taskId,
+                        identityKey: k,
                         asin: want.asin,
                         errorCategory: want.errorCategory,
                         errorType: want.errorType,
@@ -267,21 +295,50 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
             else $set[f] = content[f];
         }
 
+        // Same problem, new label: carry the current type/entity onto the row (the taskId
+        // stays — TaskActionLog and every client action are keyed by it).
+        for (const f of ['errorType', 'asin']) {
+            if (want[f] !== undefined && want[f] !== have[f]) {
+                $set[f] = want[f];
+                contentChanged = true;
+            }
+        }
+        // Rides along with any write; never a reason to write on its own (the migration
+        // backfills identities; matching does not need them stored).
+        if (have.identityKey !== k) $set.identityKey = k;
+
         let status = have.status;
+        const gotWorse = severityRank(want) > severityRank(have);
         if (have.status === 'resolved') {
             status = 'pending';
             $set.status = 'pending';
             $set.reopenedAt = now;
+            $set.reopenReason = 'reappeared';
             $unset.resolvedAt = '';
             $inc = { reopenCount: 1 };
             summary.reopened++;
+        } else if (have.status === 'completed' && gotWorse) {
+            // Marked done, and the problem has since got worse (low stock -> out of stock,
+            // an unstable metric -> sustained, thin margin -> a loss): that is new work now,
+            // not after the cooldown.
+            status = 'pending';
+            $set.status = 'pending';
+            $set.stillDetected = true;
+            $set.reopenedAt = now;
+            $set.reopenReason = 'escalated';
+            $unset.completedAt = '';
+            $unset.completedBy = '';
+            $inc = { reopenCount: 1 };
+            summary.escalated++;
         } else if (have.status === 'completed') {
             // Rows completed before completedAt existed fall back to updatedAt,
             // the last time anything (in practice, the status change) touched them.
             const completedAt = have.completedAt || have.updatedAt;
             const completedMs = completedAt ? new Date(completedAt).getTime() : NaN;
             // The spreadsheet's cooldown for this check (TaskCooldowns); 7 days when unlisted.
-            const graceDays = require('./TaskCooldowns.js').cooldownDaysFor(have);
+            // Taken from the problem's CURRENT state, which is what the seller would redo.
+            const checkDays = require('./TaskCooldowns.js').cooldownDaysFor(want);
+            const graceDays = have.completedBy === 'esf_team' ? Math.max(checkDays, TEAM_MIN_GRACE_DAYS) : checkDays;
             const graceOver = Number.isFinite(completedMs) && nowMs - completedMs > graceDays * DAY_MS;
             if (!graceOver && !have.completedAt && completedAt) {
                 // Pin the fallback before this write bumps updatedAt: otherwise every
@@ -293,7 +350,9 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
                 $set.status = 'pending';
                 $set.stillDetected = true;
                 $set.reopenedAt = now;
+                $set.reopenReason = 'still_detected';
                 $unset.completedAt = '';
+                $unset.completedBy = '';
                 $inc = { reopenCount: 1 };
                 summary.stillDetected++;
             }
@@ -323,11 +382,16 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
     // ── Issues no longer detected ──
     const vanishedOpenBySource = new Map();
     const openCountBySource = new Map();
-    for (const t of existingByKey.values()) {
+    // Rows that lost to another row with the same identity count as not detected.
+    const shadowed = existing.filter((t) => existingByKey.get(taskKey(t)) !== t);
+    const notChosen = [...existingByKey.values(), ...shadowed];
+    const isDetected = (t) => desiredByKey.has(taskKey(t)) && existingByKey.get(taskKey(t)) === t;
+
+    for (const t of notChosen) {
         if (!OPEN_STATUSES.has(t.status)) continue;
         const source = coverageSourceFor(t.errorCategory, t.errorType);
         openCountBySource.set(source, (openCountBySource.get(source) || 0) + 1);
-        if (desiredByKey.has(taskKey(t))) continue;
+        if (isDetected(t)) continue;
         if (!vanishedOpenBySource.has(source)) vanishedOpenBySource.set(source, []);
         vanishedOpenBySource.get(source).push(t);
     }
@@ -382,8 +446,8 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
 
     // ── Retention for finished work that is no longer detected ──
     const purgeBefore = nowMs - DONE_RETENTION_DAYS * DAY_MS;
-    for (const t of existingByKey.values()) {
-        if (desiredByKey.has(taskKey(t))) continue;
+    for (const t of notChosen) {
+        if (isDetected(t)) continue;
         let doneAt;
         if (t.status === 'resolved') doneAt = t.resolvedAt || t.updatedAt;
         else if (t.status === 'completed') doneAt = t.completedAt || t.updatedAt;
@@ -398,7 +462,7 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
     summary.openAmountBefore = Math.round(summary.openAmountBefore * 100) / 100;
     summary.openAmountAfter = Math.round(summary.openAmountAfter * 100) / 100;
 
-    const statusChanges = summary.inserted + summary.resolved + summary.reopened + summary.stillDetected;
+    const statusChanges = summary.inserted + summary.resolved + summary.reopened + summary.stillDetected + summary.escalated;
     const amountBase = Math.max(summary.openAmountBefore, 1);
     const amountMoved = Math.abs(summary.openAmountAfter - summary.openAmountBefore) / amountBase > MATERIAL_SHARE;
     const listTurnedOver = summary.openCountBefore === 0
@@ -414,8 +478,10 @@ module.exports = {
     planReconcile,
     coverageSourceFor,
     taskKey,
+    preferStored,
     canonical,
     COMPLETED_GRACE_DAYS,
+    TEAM_MIN_GRACE_DAYS,
     DONE_RETENTION_DAYS,
     LAST_SEEN_TOUCH_HOURS,
     RAIL_SHARE,

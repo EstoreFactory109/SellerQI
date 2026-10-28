@@ -126,7 +126,12 @@ const toApiError = (error, context) => {
         if (status === 401 || status === 403) {
             return new ApiError(status, `${context}: Zoho rejected the request (${zohoMessage})`);
         }
-        return new ApiError(status >= 400 && status < 600 ? status : 502, `${context}: ${zohoMessage}`);
+        const apiError = new ApiError(status >= 400 && status < 600 ? status : 502, `${context}: ${zohoMessage}`);
+        // Which fields Zoho refused (FIELDS_VALIDATION_ERROR), so a caller can fix exactly
+        // that one instead of guessing from the message.
+        const details = data?.error?.details;
+        apiError.zohoFields = Array.isArray(details) ? details.map((d) => d?.field_name).filter(Boolean) : [];
+        return apiError;
     }
 
     if (error.request) {

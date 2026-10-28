@@ -87,7 +87,7 @@ const getUserById =async(id)=>{
         logger.error(new ApiError(404,"Id is missing"));
         return false;
     }
-    const user=await UserModel.findOne({_id:id}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient isEsfClient needsPhoneUpdate phoneUpdateReason isVerified");
+    const user=await UserModel.findOne({_id:id}).select("firstName lastName phone whatsapp email profilePic packageType subscriptionStatus isInTrialPeriod trialEndsDate accessType servedTrial agencyName agencyId isAgencyClient isEsfClient fixItHistory needsPhoneUpdate phoneUpdateReason isVerified");
     if(!user){
         logger.error(new ApiError(404,"User not found"));
         return false;
@@ -116,6 +116,8 @@ const getUserById =async(id)=>{
         isAgencyClient: user.isAgencyClient || false,
         // Drives the ESF-only pages in the client's sidebar
         isEsfClient: user.isEsfClient || false,
+        // A past Fix it buyer keeps the Status page (what the team did) as a normal seller.
+        fixItHistory: user.fixItHistory || false,
         // Drives the phone-collection modal on the frontend
         needsPhoneUpdate: user.needsPhoneUpdate || false,
         phoneUpdateReason: user.phoneUpdateReason || null,

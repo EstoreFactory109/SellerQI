@@ -4,6 +4,8 @@
  * Projects are created in Zoho, never here. The portal's only job is to record
  * which Zoho project tracks a given client's work, so this service is about
  * *finding* the right project and storing the pointer — never about creating one.
+ * (One exception lives elsewhere: an ESF client with no project who buys a Fix it
+ * package gets one made for their brand — Services/Stripe/FixItZohoService.js.)
  *
  * The link itself lives on the client's User document (`zohoProject`), not in a
  * join collection: it is one pointer per client, read on every clients-list
@@ -266,8 +268,10 @@ const getProjectOptions = async ({ clientId, search = '', refresh = false, redac
  * stored label can never drift from the real project, and a bogus id is
  * rejected instead of silently stored.
  */
-const linkProject = async ({ clientId, projectId, staffUserId }) => {
-    const client = await UserModel.findOne({ _id: clientId, isEsfClient: true }).select('_id');
+const linkProject = async ({ clientId, projectId, staffUserId, allowNonEsfClient = false }) => {
+    // Fix it buyers who are not ESF clients get a project too (FixItZohoService); the ESF
+    // portal never lists them, so the link only serves their Fix it work.
+    const client = await UserModel.findOne(allowNonEsfClient ? { _id: clientId } : { _id: clientId, isEsfClient: true }).select('_id');
     if (!client) {
         throw new ApiError(404, 'Client not found in the ESF portal');
     }

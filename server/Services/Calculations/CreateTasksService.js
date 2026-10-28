@@ -17,11 +17,12 @@ const mongoose = require('mongoose');
 const Task = require('../../models/MCP/TaskModel.js');
 const TaskItem = require('../../models/MCP/TaskItemModel.js');
 const logger = require('../../utils/Logger.js');
-const { getTaskPriorityMeta, normalizeErrorType } = require('./TaskPrioritizationService.js');
+const { getTaskPriorityMeta } = require('./TaskPrioritizationService.js');
 const { buildGroupsFromTasks } = require('./TaskOpportunityGroupsService.js');
 const { planReconcile } = require('./TaskReconcilePlanner.js');
 const { taskReconcileModeFor, MODES: RECONCILE_MODES } = require('../../utils/taskReconcileGate.js');
 const { acquireLock } = require('../../utils/mongoLock.js');
+const { identityKeyOf, collapseByIdentity } = require('./TaskIdentity.js');
 
 // Chunk size for bulk insert operations
 const TASK_INSERT_CHUNK_SIZE = 500;
@@ -42,7 +43,14 @@ const AI_REFRESH_MIN_HOURS_ON_CHANGE = 24;
 
 // Fields reconcile needs from stored tasks. Text and renderData are included because
 // they are compared, so a stale baked-in error/solution gets replaced.
-const RECONCILE_FIELDS = '_id asin errorCategory errorType status productName error solution renderData amount amountIsEstimated capitalAmount firstSeenAt lastSeenAt completedAt resolvedAt createdAt updatedAt';
+/** Fix it work orders mirror this marketplace's tasks into Zoho: sync them after a change. */
+const fixItSyncSoon = (userId, country, region) => {
+    if (!country || !region) return;
+    const FixItZohoSync = require('../Stripe/FixItZohoSync.js');
+    FixItZohoSync.syncInBackground(() => FixItZohoSync.syncForMarketplace(userId, country, region), `tasks ${userId} ${country}-${region}`);
+};
+
+const RECONCILE_FIELDS = '_id taskId identityKey asin errorCategory errorType status completedBy productName error solution renderData amount amountIsEstimated capitalAmount firstSeenAt lastSeenAt completedAt resolvedAt createdAt updatedAt';
 
 /**
  * Deterministic task id: the same issue in the same marketplace always gets the
@@ -60,10 +68,15 @@ const dryRunDue = (userId, country, region, now = Date.now()) => {
     return true;
 };
 
+/**
+ * From the task's IDENTITY (TaskIdentity), not its label: a problem whose errorType moves
+ * with its state keeps one id. Stored rows keep whatever id they were created with — the
+ * planner never rewrites taskId, because TaskActionLog and client actions point at it.
+ */
 const stableTaskId = (userId, country, region, task) =>
     'task_' + crypto
         .createHash('sha1')
-        .update([String(userId), country || '', region || '', task.asin, task.errorCategory, task.errorType].join('|'))
+        .update([String(userId), country || '', region || '', task.identityKey || identityKeyOf(task)].join('|'))
         .digest('hex')
         .slice(0, 24);
 
@@ -331,24 +344,13 @@ class CreateTaskService {
 
         // tasks-logics.xlsx detectors (kpi/): already task-shaped, with their own text.
         if (Array.isArray(data.kpiTasks)) {
-            // An empty shelf is one problem: the out-of-stock task (with its lost
-            // sales) replaces the product's replenishment tasks, which Amazon's
-            // restock alert also raises for out-of-stock SKUs.
-            const outOfStock = new Set(data.kpiTasks
-                .filter(t => t.errorCategory === 'inventory' && t.errorType === 'out_of_stock')
-                .map(t => t.asin));
-            if (outOfStock.size > 0) {
-                for (let i = tasks.length - 1; i >= 0; i--) {
-                    const t = tasks[i];
-                    if (t.errorCategory === 'inventory' && outOfStock.has(t.asin)
-                        && normalizeErrorType(t.errorType) === 'replenishment_needed') {
-                        tasks.splice(i, 1);
-                    }
-                }
-            }
             tasks.push(...data.kpiTasks.map(task => ({ status: TaskStatus.PENDING, ...task })));
         }
-        return tasks;
+        // One task per problem (TaskIdentity). Where two states of one problem were both
+        // raised, the worse wins: an empty shelf's out-of-stock task (with its lost sales)
+        // stands in for the product's restock task, which Amazon's alert also raises for
+        // out-of-stock SKUs; and of one search term in several ad groups, the costliest.
+        return collapseByIdentity(tasks);
     }
 
     /**
@@ -422,6 +424,7 @@ class CreateTaskService {
                     await userTaskDocument.save();
                     
                     tasksRebuilt = true;
+                    fixItSyncSoon(userId, country, region);
                     logger.info(`Renewed tasks for user ${userId}. Inserted ${insertResult.insertedCount} fresh tasks.`);
                 } else {
                     logger.info(`Within renewal period for user ${userId}${scope}. Adding new unique tasks.`);
@@ -436,6 +439,7 @@ class CreateTaskService {
                     }
                     
                     logger.info(`Added ${insertResult.insertedCount} new unique tasks for user ${userId}`);
+                    if (insertResult.insertedCount > 0) fixItSyncSoon(userId, country, region);
                 }
             } else {
                 // Create new metadata document
@@ -529,6 +533,8 @@ class CreateTaskService {
             });
 
             const write = await TaskItem.reconcileWrite(ops);
+            // A Fix it buyer's tasks are mirrored as Zoho subtasks: pass the changes on.
+            if (summary.changed) fixItSyncSoon(userId, country, region);
 
             if (!meta) {
                 const renewalDate = new Date(now);
@@ -950,32 +956,36 @@ class CreateTaskService {
                 });
             }
             
-            // Replenishment/restock errors - handles single or multiple
+            // Replenishment/restock: ONE task per product, listing every SKU that needs
+            // restocking. Per-SKU tasks could never be the same task as the product's
+            // out-of-stock task (TaskIdentity "stock"), so running out used to close the
+            // seller's restock task and open a new one; and SKUs sharing their first 20
+            // characters (the old errorType suffix) silently collapsed into one.
             if (error.replenishmentErrorData) {
-                const processReplenishmentError = (repError) => {
-                    if (repError.status !== 'Error') return;
-                    
-                    const sku = repError.sku || '';
-                    const skuInfo = sku ? ` (SKU: ${sku})` : '';
-                    const qty = repError.recommendedReplenishmentQty || repError.data || 0;
-                    const available = repError.available || 0;
-                    
+                const rows = (Array.isArray(error.replenishmentErrorData) ? error.replenishmentErrorData : [error.replenishmentErrorData])
+                    .filter((rep) => rep && rep.status === 'Error');
+                if (rows.length > 0) {
+                    const skus = rows.map((rep) => ({
+                        sku: rep.sku || '',
+                        available: Number(rep.available) || 0,
+                        recommended: Number(rep.recommendedReplenishmentQty || rep.data) || 0,
+                        message: rep.Message || null,
+                    }));
+                    const line = (r) => `${r.available} units available, Amazon recommends replenishing ${r.recommended} units`;
+                    const error_ = rows.length === 1
+                        ? `Replenishment | Low Inventory${skus[0].sku ? ` (SKU: ${skus[0].sku})` : ''}: ${rows[0].Message || `Product requires restocking. ${line(skus[0])}.`}`
+                        : `Replenishment | Low Inventory: ${rows.length} SKUs of this product need restocking — ${skus.map((r) => `${r.sku || 'unknown SKU'}: ${line(r)}`).join('; ')}.`;
                     tasks.push({
                         taskId: generateTaskId(),
                         productName,
                         asin,
                         errorCategory: 'inventory',
-                        errorType: `replenishment_needed${sku ? '_' + sku.substring(0, 20) : ''}`,
-                        error: `Replenishment | Low Inventory${skuInfo}: ${repError.Message || `Product requires restocking. ${available} units available, Amazon recommends replenishing ${qty} units.`}`,
-                        solution: repError.HowToSolve || repError.HowTOSolve || 'Create an FBA shipment immediately with the recommended quantity. Analyze your sales data to forecast demand more accurately. Consider setting up automatic restocking alerts in Seller Central.',
+                        errorType: 'replenishment_needed',
+                        error: error_,
+                        solution: rows[0].HowToSolve || rows[0].HowTOSolve || 'Create an FBA shipment immediately with the recommended quantity. Analyze your sales data to forecast demand more accurately. Consider setting up automatic restocking alerts in Seller Central.',
+                        renderData: { skus },
                         status: TaskStatus.PENDING
                     });
-                };
-                
-                if (Array.isArray(error.replenishmentErrorData)) {
-                    error.replenishmentErrorData.forEach(processReplenishmentError);
-                } else {
-                    processReplenishmentError(error.replenishmentErrorData);
                 }
             }
         });
@@ -1262,6 +1272,24 @@ class CreateTaskService {
                 ...this.renderTaskIfNeeded(task),
                 ...getTaskPriorityMeta(task)
             })));
+            // Fix it buyers: which tasks the ESF team has (mirrored as Zoho subtasks), and
+            // which they finished. One query, only rows that have a mapping.
+            const fixIt = await require('../../models/system/FixItSubtaskModel.js')
+                .find({ userId, taskId: { $in: tasks.map((t) => t.taskId) }, state: { $in: ['open', 'closed'] } })
+                .select('taskId state closedBy').lean()
+                .catch(() => []);
+            if (fixIt.length) {
+                const byTask = new Map(fixIt.map((m) => [m.taskId, m]));
+                for (const t of tasks) {
+                    const m = byTask.get(t.taskId);
+                    if (m) t.fixIt = { state: m.state === 'open' ? 'with_team' : (m.closedBy === 'zoho' ? 'done_by_team' : 'closed') };
+                }
+            }
+            // Completed by the team in Zoho (Fix it, or a closed Zoho task matched by
+            // ZohoCloseSync for a staff-added ESF client).
+            for (const t of tasks) {
+                if (t.completedBy === 'esf_team' && t.status === 'completed' && !t.fixIt) t.fixIt = { state: 'done_by_team' };
+            }
             const taskCounts = await TaskItem.countByStatus(userId, country, region);
 
             // The same issue-type groups the Dashboard's "Top things to fix" shows,
@@ -1345,9 +1373,10 @@ class CreateTaskService {
         try {
             // completedAt starts the grace period before a still-detected issue is
             // reopened (TaskReconcilePlanner); any seller action clears stillDetected.
+            // The seller's own decision: no longer "done by the ESF team".
             const update = status === 'completed'
-                ? { $set: { status, completedAt: new Date(), stillDetected: false } }
-                : { $set: { status, stillDetected: false }, $unset: { completedAt: '' } };
+                ? { $set: { status, completedAt: new Date(), stillDetected: false }, $unset: { completedBy: '' } }
+                : { $set: { status, stillDetected: false }, $unset: { completedAt: '', completedBy: '' } };
             const task = await TaskItem.findOneAndUpdate(
                 { userId, taskId },
                 update,
@@ -1357,6 +1386,18 @@ class CreateTaskService {
             if (!task) {
                 throw new Error('Task not found');
             }
+
+            // Un-ticking something the team's closed Zoho task had marked done: note it, so the
+            // matching can be judged (ESF portal → Auto-closed tasks).
+            if (status !== 'completed') {
+                Promise.resolve()
+                    .then(() => require('../Zoho/ZohoCloseSync.js').noteUndone(userId, taskId))
+                    .catch((error) => logger.warn(`[updateTaskStatus] undo not noted for ${taskId}: ${error.message}`));
+            }
+
+            // Mirrored as a Fix it subtask? Close / reopen it in Zoho now, not at the next sweep.
+            const FixItZohoSync = require('../Stripe/FixItZohoSync.js');
+            FixItZohoSync.syncInBackground(() => FixItZohoSync.syncForTask(userId, taskId), `task ${taskId} status`);
             
             return task;
         } catch (error) {

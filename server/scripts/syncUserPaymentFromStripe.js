@@ -112,8 +112,10 @@ async function findStripeSubscriptionForUser(stripeClient, user, existingSub) {
         limit: 10,
         expand: ['data.items.data.price'],
       });
-      if (subs.data.length > 0) {
-        stripeSubscription = subs.data[0];
+      // A Fix it subscription (Tasks page) is not the SellerQI plan; never sync from it.
+      const planSubs = subs.data.filter((sub) => sub.metadata?.purchaseType !== 'fixit');
+      if (planSubs.length > 0) {
+        stripeSubscription = planSubs[0];
         const full = await stripeClient.subscriptions.retrieve(stripeSubscription.id, {
           expand: ['customer', 'latest_invoice', 'items.data.price'],
         });

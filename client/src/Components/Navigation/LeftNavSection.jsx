@@ -379,6 +379,11 @@ const LeftNavSection = () => {
                                 </NavDropdown>
                             )}
 
+                            {/* A past Fix it buyer (back to a normal seller) keeps the record of the team's work. */}
+                            {!isEsfClient && user?.fixItHistory === true && (
+                                <NavItem to="/seller-central-checker/estore-factory/status" icon={ListChecks} label="Fix it history" />
+                            )}
+
                             {/* Account & Settings — hidden for an agency admin viewing a client */}
                             {!isAgencyAdminViewingClient && (
                                 <NavDropdown icon={Settings} label="Account & Settings" open={openGroup === 'account'} onToggle={() => toggleGroup('account')} isActive={isSettingsPage}>

@@ -1,0 +1,300 @@
+/**
+ * Buying a "Fix it" package through Stripe Checkout.
+ *
+ * Pinned: the server picks the price (the client only names a package) and refuses a Stripe
+ * price that does not match; the Trial is a one-time payment and Standard/Accelerated are monthly
+ * subscriptions, both carrying purchaseType for the webhooks; a second live Fix it subscription
+ * is refused; the SellerQI-plan Subscription is never touched; completing from the webhook AND the success
+ * page records one purchase and sends the support email once, retrying if the email failed;
+ * the success page only confirms the caller's own paid session; a refund of a package is
+ * handled here and never reaches the subscription.
+ */
+jest.mock('../../../Services/Stripe/StripeService.js', () => ({ stripe: {}, createOrGetCustomer: jest.fn() }));
+jest.mock('../../../Services/Email/SendFixItPurchaseEmail.js', () => ({ sendFixItPurchaseEmail: jest.fn() }));
+jest.mock('../../../Services/Stripe/FixItZohoService.js', () => ({ addFixItTaskToZoho: jest.fn() }));
+jest.mock('../../../models/user-auth/userModel.js', () => ({ findById: jest.fn() }));
+jest.mock('../../../models/user-auth/SubscriptionModel.js', () => ({ exists: jest.fn() }));
+jest.mock('../../../models/system/PaymentLogsModel.js', () => ({ logEvent: jest.fn(), logWebhookEvent: jest.fn() }));
+jest.mock('../../../models/system/FixItSubscriptionModel.js', () => ({ findOne: jest.fn(), LIVE_STATUSES: ['active', 'trialing', 'past_due', 'unpaid'] }));
+jest.mock('../../../Services/Stripe/FixItSubscriptionService.js', () => ({ syncFromStripe: jest.fn(), paymentIntentOfInvoice: jest.fn() }));
+jest.mock('../../../models/system/FixItPurchaseModel.js', () => {
+  // A tiny in-memory stand-in for the few queries the service makes.
+  const rows = [];
+  const matches = (row, filter) => Object.entries(filter).every(([k, v]) => {
+    if (k === '$or') return v.some((f) => matches(row, f));
+    if (v && typeof v === 'object' && '$lt' in v) return row[k] != null && row[k] < v.$lt;
+    if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(row[k]);
+    if (v && typeof v === 'object' && '$ne' in v) return row[k] !== v.$ne;
+    return String(row[k]) === String(v) || (v === null && row[k] == null);
+  });
+  const wrap = (row) => row && { ...row, toObject: () => ({ ...row }) };
+  const query = (value) => ({ sort: () => query(value), select: () => query(value), lean: async () => value, then: (r, j) => Promise.resolve(wrap(value)).then(r, j) });
+  return {
+    _rows: rows,
+    create: async (doc) => { const row = { _id: `p${rows.length + 1}`, status: 'pending', supportNotifiedAt: null, paidAt: null, ...doc }; rows.push(row); return wrap(row); },
+    findOne: (filter) => query(rows.filter((r) => matches(r, filter)).slice(-1)[0] || null),
+    findById: (id) => query(rows.find((r) => r._id === id) || null),
+    updateOne: async (filter, update) => { const row = rows.find((r) => matches(r, filter)); if (row) Object.assign(row, update.$set); return {}; },
+    findOneAndUpdate: (filter, update, opts = {}) => {
+      let row = rows.find((r) => matches(r, filter));
+      if (!row && opts.upsert) { row = { _id: `p${rows.length + 1}`, status: 'pending', supportNotifiedAt: null, ...update.$setOnInsert }; rows.push(row); }
+      else if (row && update.$set) Object.assign(row, update.$set);
+      return query(row || null);
+    },
+  };
+});
+
+const StripeService = require('../../../Services/Stripe/StripeService.js');
+const FixItPurchase = require('../../../models/system/FixItPurchaseModel.js');
+const User = require('../../../models/user-auth/userModel.js');
+const Subscription = require('../../../models/user-auth/SubscriptionModel.js');
+const PaymentLogs = require('../../../models/system/PaymentLogsModel.js');
+const { sendFixItPurchaseEmail } = require('../../../Services/Email/SendFixItPurchaseEmail.js');
+const { addFixItTaskToZoho } = require('../../../Services/Stripe/FixItZohoService.js');
+const FixItSubscription = require('../../../models/system/FixItSubscriptionModel.js');
+const FixItSubscriptionService = require('../../../Services/Stripe/FixItSubscriptionService.js');
+const svc = require('../../../Services/Stripe/FixItCheckoutService.js');
+
+const USER = '64b000000000000000000001';
+const price = (overrides = {}) => ({ id: 'price_std', unit_amount: 29900, currency: 'usd', type: 'one_time', active: true, ...overrides });
+const monthly = { type: 'recurring', recurring: { interval: 'month', interval_count: 1 } };
+const PRICES = {
+  sqi_fixit_trial: price({ id: 'price_trial', unit_amount: 2500 }),
+  sqi_fixit_standard_monthly: price(monthly),
+  sqi_fixit_accelerated_monthly: price({ id: 'price_acc', unit_amount: 49900, ...monthly }),
+};
+const chain = (value) => ({ select: () => ({ lean: async () => value }) });
+const paidSession = (overrides = {}) => ({
+  id: 'cs_test_1', payment_status: 'paid', payment_intent: 'pi_1', customer: 'cus_1', amount_total: 29900, currency: 'usd',
+  metadata: { userId: USER, purchaseType: 'fixit', packageId: 'standard' }, ...overrides,
+});
+
+beforeEach(() => {
+  FixItPurchase._rows.length = 0;
+  svc._priceCache.clear();
+  process.env.STRIPE_SECRET_KEY = 'sk_test_x';
+  process.env.FRONTEND_URL = 'members.sellerqi.com';
+  StripeService.stripe = {
+    prices: { list: jest.fn(async ({ lookup_keys: [key] }) => ({ data: [PRICES[key]] })) },
+    customers: { retrieve: jest.fn() },
+    checkout: { sessions: { create: jest.fn(async () => ({ id: 'cs_test_1', url: 'https://checkout.stripe.com/c/pay/cs_test_1' })), retrieve: jest.fn() } },
+  };
+  StripeService.createOrGetCustomer.mockResolvedValue({ id: 'cus_1' });
+  User.findById.mockReturnValue({ select: () => ({ lean: async () => ({ _id: USER, firstName: 'Ann', lastName: 'Lee', email: 'ann@acme.com' }) }) });
+  Subscription.exists.mockResolvedValue(null);
+  FixItSubscription.findOne.mockReturnValue(chain(null));
+  FixItSubscriptionService.syncFromStripe.mockResolvedValue({});
+  FixItSubscriptionService.paymentIntentOfInvoice.mockResolvedValue('pi_inv');
+  sendFixItPurchaseEmail.mockResolvedValue('msg-1');
+  addFixItTaskToZoho.mockResolvedValue({ status: 'skipped' });
+  PaymentLogs.logEvent.mockResolvedValue({});
+  PaymentLogs.logWebhookEvent.mockResolvedValue({ isNew: true });
+});
+
+// Background after-payment work must never leak into the next test.
+afterEach(() => svc.drainBackground());
+
+describe('starting checkout', () => {
+  it('Standard: a monthly subscription for the server\'s price, tagged for every webhook', async () => {
+    const out = await svc.createFixItCheckout(USER, { packageId: 'standard', openTasks: 9, monthlyRecoverable: 1007.03, atStakeCurrency: 'A$' });
+    expect(out.url).toBe('https://checkout.stripe.com/c/pay/cs_test_1');
+    expect(StripeService.stripe.prices.list).toHaveBeenCalledWith({ lookup_keys: ['sqi_fixit_standard_monthly'], active: true, limit: 1 });
+    const params = StripeService.stripe.checkout.sessions.create.mock.calls[0][0];
+    const metadata = { userId: USER, purchaseType: 'fixit', packageId: 'standard' };
+    expect(params).toMatchObject({
+      mode: 'subscription',
+      customer: 'cus_1',
+      line_items: [{ price: 'price_std', quantity: 1 }],
+      metadata,
+      subscription_data: { metadata },
+      success_url: 'https://members.sellerqi.com/fix-it/success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: 'https://members.sellerqi.com/seller-central-checker/tasks?fixit=cancelled',
+    });
+    expect(params).not.toHaveProperty('payment_intent_data'); // not allowed in subscription mode
+    expect(FixItPurchase._rows[0]).toMatchObject({ packageId: 'standard', tasks: 30, amount: 299, status: 'pending', billing: 'monthly', period: 1, stripeSessionId: 'cs_test_1', openTasks: 9, atStakeCurrency: 'A$' });
+  });
+
+  it('Trial: a one-time payment with a receipt', async () => {
+    await svc.createFixItCheckout(USER, { packageId: 'trial' });
+    const params = StripeService.stripe.checkout.sessions.create.mock.calls[0][0];
+    expect(params).toMatchObject({
+      mode: 'payment',
+      line_items: [{ price: 'price_trial', quantity: 1 }],
+      payment_intent_data: { metadata: { userId: USER, purchaseType: 'fixit', packageId: 'trial' }, receipt_email: 'ann@acme.com' },
+    });
+    expect(params).not.toHaveProperty('subscription_data');
+    expect(FixItPurchase._rows[0]).toMatchObject({ billing: 'one_time', period: null });
+  });
+
+  it('refuses a second Fix it subscription, but still sells the Trial', async () => {
+    FixItSubscription.findOne.mockReturnValue(chain({ packageName: 'Standard' }));
+    await expect(svc.createFixItCheckout(USER, { packageId: 'accelerated' })).rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('Standard') });
+    expect(FixItSubscription.findOne.mock.calls[0][0]).toEqual({ userId: USER, status: { $in: ['active', 'trialing', 'past_due', 'unpaid'] } });
+    await svc.createFixItCheckout(USER, { packageId: 'trial' });
+    expect(StripeService.stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a monthly package whose Stripe price is one-time', async () => {
+    StripeService.stripe.prices.list.mockResolvedValueOnce({ data: [price()] });
+    await expect(svc.createFixItCheckout(USER, { packageId: 'standard' })).rejects.toMatchObject({ statusCode: 503 });
+  });
+
+  it('refuses an unknown package without calling Stripe', async () => {
+    await expect(svc.createFixItCheckout(USER, { packageId: 'free' })).rejects.toMatchObject({ statusCode: 400 });
+    expect(StripeService.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses to sell when the Stripe price is missing or not what the package costs', async () => {
+    StripeService.stripe.prices.list.mockResolvedValueOnce({ data: [] });
+    await expect(svc.createFixItCheckout(USER, { packageId: 'standard' })).rejects.toMatchObject({ statusCode: 503 });
+    StripeService.stripe.prices.list.mockResolvedValueOnce({ data: [price({ unit_amount: 100 })] });
+    await expect(svc.createFixItCheckout(USER, { packageId: 'standard' })).rejects.toMatchObject({ statusCode: 503 });
+    expect(StripeService.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it('a LITE seller buying again reuses the Stripe customer from their earlier package', async () => {
+    FixItPurchase._rows.push({ _id: 'old', userId: USER, stripeCustomerId: 'cus_old', stripeSessionId: 'cs_old', status: 'paid' });
+    StripeService.stripe.customers.retrieve.mockResolvedValue({ id: 'cus_old' });
+    await svc.createFixItCheckout(USER, { packageId: 'trial' });
+    expect(StripeService.stripe.checkout.sessions.create.mock.calls[0][0].customer).toBe('cus_old');
+    expect(StripeService.createOrGetCustomer).not.toHaveBeenCalled();
+  });
+});
+
+describe('completing the purchase', () => {
+  beforeEach(async () => { await svc.createFixItCheckout(USER, { packageId: 'standard' }); });
+
+  it('webhook and success page together: one paid purchase, one email', async () => {
+    await svc.completeFixItPurchase(paidSession(), { source: 'WEBHOOK', webhookEventId: 'evt_1' });
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(FixItPurchase._rows).toHaveLength(1);
+    expect(FixItPurchase._rows[0]).toMatchObject({ status: 'paid', amount: 299, stripePaymentIntentId: 'pi_1' });
+    expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(1);
+    expect(PaymentLogs.logWebhookEvent).toHaveBeenCalledWith(expect.objectContaining({ webhookEventId: 'evt_1', eventType: 'STRIPE_PAYMENT_SUCCESS' }));
+  });
+
+  it('a failed email is retried by the next path', async () => {
+    sendFixItPurchaseEmail.mockResolvedValueOnce(false);
+    await svc.completeFixItPurchase(paidSession(), { source: 'WEBHOOK', webhookEventId: 'evt_1' });
+    await svc.drainBackground();
+    expect(FixItPurchase._rows[0].supportNotifiedAt).toBeNull();
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(2);
+    expect(FixItPurchase._rows[0].supportNotifiedAt).toBeInstanceOf(Date);
+  });
+
+  it('a subscription\'s first payment is month 1, linked to its subscription and invoice', async () => {
+    const out = await svc.completeFixItPurchase(paidSession({ payment_intent: null, subscription: 'sub_1', invoice: 'in_1' }), { source: 'API' });
+    expect(out).toMatchObject({ status: 'paid', billing: 'monthly', period: 1, stripeSubscriptionId: 'sub_1', stripeInvoiceId: 'in_1', stripePaymentIntentId: 'pi_inv' });
+    expect(FixItSubscriptionService.paymentIntentOfInvoice).toHaveBeenCalledWith('in_1');
+    expect(FixItSubscriptionService.syncFromStripe).toHaveBeenCalledWith('sub_1');
+  });
+
+  it('records what was really paid after a promo code', async () => {
+    await svc.completeFixItPurchase(paidSession({ amount_total: 14950 }), { source: 'API' });
+    expect(FixItPurchase._rows[0].amount).toBe(149.5);
+  });
+
+  it('does nothing until the payment is complete', async () => {
+    expect(await svc.completeFixItPurchase(paidSession({ payment_status: 'unpaid' }))).toBeNull();
+    expect(FixItPurchase._rows[0].status).toBe('pending');
+    expect(sendFixItPurchaseEmail).not.toHaveBeenCalled();
+  });
+
+  it('an ESF client\'s purchase: the Zoho task is made once, before the email, which carries it', async () => {
+    addFixItTaskToZoho.mockResolvedValue({ status: 'done', projectId: 'P9', projectName: 'Acme Goods', projectSource: 'created', taskId: 'T1', taskName: 'Fix it – Standard package' });
+    await svc.completeFixItPurchase(paidSession(), { source: 'WEBHOOK', webhookEventId: 'evt_1' });
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(addFixItTaskToZoho).toHaveBeenCalledTimes(1);
+    expect(FixItPurchase._rows[0]).toMatchObject({ zohoStatus: 'done', zohoProjectName: 'Acme Goods', zohoProjectSource: 'created', zohoTaskId: 'T1' });
+    expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(1);
+    expect(sendFixItPurchaseEmail.mock.calls[0][0]).toMatchObject({ zohoStatus: 'done', zohoProjectName: 'Acme Goods' });
+  });
+
+  it('a Zoho failure still emails support, with the reason', async () => {
+    addFixItTaskToZoho.mockResolvedValue({ status: 'failed', error: 'Zoho Projects is not connected' });
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(sendFixItPurchaseEmail.mock.calls[0][0]).toMatchObject({ zohoStatus: 'failed', zohoError: 'Zoho Projects is not connected' });
+  });
+
+  it('a crash in the Zoho step is recorded as failed and the email still goes', async () => {
+    addFixItTaskToZoho.mockRejectedValue(new Error('boom'));
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(FixItPurchase._rows[0]).toMatchObject({ zohoStatus: 'failed', zohoError: 'boom' });
+    expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('while another path holds a fresh Zoho claim, nothing is done twice and the email waits for it', async () => {
+    FixItPurchase._rows[0].zohoStatus = 'running';
+    FixItPurchase._rows[0].zohoClaimedAt = new Date();
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(addFixItTaskToZoho).not.toHaveBeenCalled();
+    expect(sendFixItPurchaseEmail).not.toHaveBeenCalled();
+  });
+
+  it('a claim abandoned 10+ minutes ago (crash, deploy) is taken over', async () => {
+    FixItPurchase._rows[0].zohoStatus = 'running';
+    FixItPurchase._rows[0].zohoClaimedAt = new Date(Date.now() - 11 * 60 * 1000);
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+    expect(addFixItTaskToZoho).toHaveBeenCalledTimes(1);
+    expect(sendFixItPurchaseEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores sessions that are not Fix it purchases', async () => {
+    expect(await svc.completeFixItPurchase(paidSession({ metadata: { userId: USER, planType: 'PRO' } }))).toBeNull();
+  });
+});
+
+describe('the success page', () => {
+  it('confirms the caller\'s own paid session', async () => {
+    await svc.createFixItCheckout(USER, { packageId: 'standard' });
+    StripeService.stripe.checkout.sessions.retrieve.mockResolvedValue(paidSession());
+    const out = await svc.confirmFixItPurchase('cs_test_1', USER);
+    expect(out).toMatchObject({ status: 'paid', purchase: { packageId: 'standard', packageName: 'Standard', tasks: 30, amount: 299 } });
+  });
+
+  it('refuses someone else\'s session', async () => {
+    StripeService.stripe.checkout.sessions.retrieve.mockResolvedValue(paidSession({ metadata: { userId: 'someone-else', purchaseType: 'fixit', packageId: 'standard' } }));
+    await expect(svc.confirmFixItPurchase('cs_test_1', USER)).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('says processing while unpaid, and rejects a malformed id', async () => {
+    StripeService.stripe.checkout.sessions.retrieve.mockResolvedValue(paidSession({ payment_status: 'unpaid' }));
+    expect(await svc.confirmFixItPurchase('cs_test_1', USER)).toEqual({ status: 'processing' });
+    await expect(svc.confirmFixItPurchase('../x', USER)).rejects.toMatchObject({ statusCode: 400 });
+  });
+});
+
+describe('refunds and abandoned checkouts', () => {
+  beforeEach(async () => {
+    await svc.createFixItCheckout(USER, { packageId: 'standard' });
+    await svc.completeFixItPurchase(paidSession(), { source: 'API' });
+    await svc.drainBackground();
+  });
+
+  it('a full refund marks the purchase and is reported as handled', async () => {
+    const handled = await svc.handleFixItRefund({ id: 'ch_1', payment_intent: 'pi_1', amount: 29900, amount_refunded: 29900, currency: 'usd' }, 'evt_r');
+    expect(handled).toBe(true);
+    expect(FixItPurchase._rows[0]).toMatchObject({ status: 'refunded', amountRefunded: 299 });
+  });
+
+  it('a subscription charge is not ours', async () => {
+    expect(await svc.handleFixItRefund({ id: 'ch_2', payment_intent: 'pi_sub', amount: 100, amount_refunded: 100, metadata: {} })).toBe(false);
+  });
+
+  it('an expired checkout marks only a pending purchase', async () => {
+    await svc.createFixItCheckout(USER, { packageId: 'trial' });
+    StripeService.stripe.checkout.sessions.create.mockResolvedValueOnce({ id: 'cs_test_2', url: 'x' });
+    FixItPurchase._rows[1].stripeSessionId = 'cs_test_2';
+    expect(await svc.expireFixItCheckout({ id: 'cs_test_2', metadata: { purchaseType: 'fixit' } })).toBe(true);
+    expect(FixItPurchase._rows[1].status).toBe('expired');
+    expect(await svc.expireFixItCheckout({ id: 'cs_sub', metadata: { planType: 'PRO' } })).toBe(false);
+  });
+});

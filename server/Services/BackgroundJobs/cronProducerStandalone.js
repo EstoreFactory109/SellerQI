@@ -22,6 +22,7 @@
  *   - `initializeEmailReminderJob`         → 48-hour reactivation emails
  *   - `zohoTaskSyncStandalone.setupCron`   → nightly Zoho project-task sync
  *   - `gmailInboxStandalone.setupCron`     → ESF inbox poll + watch renewal
+ *   - `fixItZohoSyncStandalone.setupCron` → Fix it subtasks ↔ SellerQI tasks, every 30 min
  *   - `fxRatesStandalone.setupCron`        → daily currency exchange rates
  *
  * Safety
@@ -202,6 +203,16 @@ async function start() {
         logger.info('[CronProducerStandalone] Zoho task sync cron initialized');
     } catch (error) {
         logger.error('[CronProducerStandalone] Zoho task sync init failed', { error: error?.message });
+    }
+
+    // Fix it ↔ Zoho subtask sweep (every 30 min): brings closes made in Zoho back to the
+    // seller's SellerQI tasks. Same hosting reasoning as the Zoho sync above.
+    try {
+        const { setupCron: setupFixItZohoCron } = require('./fixItZohoSyncStandalone.js');
+        setupFixItZohoCron();
+        logger.info('[CronProducerStandalone] Fix it Zoho sweep cron initialized');
+    } catch (error) {
+        logger.error('[CronProducerStandalone] Fix it Zoho sweep init failed', { error: error?.message });
     }
 
     // Estore Factory report emails: four cadences, ESF clients only. Hosted here

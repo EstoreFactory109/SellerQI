@@ -38,4 +38,24 @@ const esfClientOnly = asyncHandler(async (req, res, next) => {
     next();
 });
 
+/**
+ * The Status page's READ routes for an ESF client, or for a seller who was one through a Fix
+ * it package (fixItHistory): when their Fix it ends they go back to a normal seller but keep
+ * the record of what the team did. Replying, task requests and the rest stay ESF-client only.
+ */
+const esfClientOrFixItHistory = asyncHandler(async (req, res, next) => {
+    if (!req.userId) {
+        return res.status(401).json(new ApiResponse(401, '', 'Authentication required'));
+    }
+    const user = await UserModel.findById(req.userId).select('isEsfClient fixItHistory');
+    if (!user) {
+        return res.status(401).json(new ApiResponse(401, '', 'User not found'));
+    }
+    if (user.isEsfClient !== true && user.fixItHistory !== true) {
+        return res.status(403).json(new ApiResponse(403, '', 'This page is not available for this account'));
+    }
+    next();
+});
+
 module.exports = esfClientOnly;
+module.exports.orFixItHistory = esfClientOrFixItHistory;

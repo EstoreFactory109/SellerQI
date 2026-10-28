@@ -72,6 +72,9 @@ const ZohoProjectTaskSchema = new mongoose.Schema({
     projectId: { type: String, required: true, index: true },
     projectName: { type: String, default: null },
     taskId: { type: String, required: true },
+    // Subtask tree (v3 parental_info). The Status page folds Fix it subtasks into their parent.
+    parentTaskId: { type: String, default: null },
+    depth: { type: Number, default: 0 },
 
     name: { type: String, default: null },
     // The portal's own status label (this portal uses Open/Content/Design).

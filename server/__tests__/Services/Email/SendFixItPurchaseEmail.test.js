@@ -1,0 +1,131 @@
+/**
+ * The email the ESF team gets when a seller pays for a Fix it package.
+ * Pinned: it goes to support@estorefactory.com unless FIXIT_PURCHASE_NOTIFY_EMAIL is set; it
+ * carries the seller's email, phone, WhatsApp, brand and the package; a Google signup's
+ * placeholder number is never shown as real; seller-typed values are HTML-escaped; a failed
+ * send returns false (the caller retries) instead of throwing.
+ */
+const mockSendMail = jest.fn();
+jest.mock('nodemailer', () => ({ createTransport: () => ({ sendMail: (...a) => mockSendMail(...a) }) }));
+jest.mock('../../../models/system/EmailLogsModel.js', () => function EmailLogs() {
+  this.save = async () => {};
+  this.markAsSent = async () => {};
+  this.markAsFailed = async () => {};
+});
+jest.mock('../../../models/user-auth/userModel.js', () => ({ findById: jest.fn() }));
+jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({ findOne: jest.fn() }));
+
+const User = require('../../../models/user-auth/userModel.js');
+const Seller = require('../../../models/user-auth/sellerCentralModel.js');
+const { sendFixItPurchaseEmail, sendFixItCancellationEmail } = require('../../../Services/Email/SendFixItPurchaseEmail.js');
+
+const lean = (value) => ({ select: () => ({ lean: async () => value }) });
+const leanCatch = (value) => ({ select: () => ({ lean: () => ({ catch: () => Promise.resolve(value) }) }) });
+const purchase = {
+  _id: 'p1', userId: 'u1', packageName: 'Standard', tasks: 30, amount: 299, currency: 'USD', paidAt: '2026-10-27T10:00:00Z',
+  openTasks: 9, monthlyRecoverable: 1007.03, atStakeCurrency: 'A$', stripePaymentIntentId: 'pi_1', stripeCustomerId: 'cus_1',
+};
+const ann = { _id: 'u1', firstName: 'Ann', lastName: '<b>Lee</b>', email: 'ann@acme.com', phone: '+61400111222', whatsapp: '+61400111333', packageType: 'PRO' };
+
+beforeEach(() => {
+  delete process.env.FIXIT_PURCHASE_NOTIFY_EMAIL;
+  mockSendMail.mockResolvedValue({ messageId: 'm1' });
+  User.findById.mockReturnValue(leanCatch(ann));
+  Seller.findOne.mockReturnValue(lean({ brand: 'Acme Goods', sellerAccount: [{ country: 'AU' }, { country: 'US' }, { country: 'AU' }] }));
+});
+
+it('tells support@estorefactory.com who bought what, and how to reach them', async () => {
+  expect(await sendFixItPurchaseEmail(purchase)).toBe('m1');
+  const mail = mockSendMail.mock.calls[0][0];
+  expect(mail.to).toEqual(['support@estorefactory.com']);
+  expect(mail.replyTo).toBe('ann@acme.com');
+  expect(mail.subject).toBe('Fix it purchase: Standard ($299) — Ann <b>Lee</b>');
+  for (const bit of ['ann@acme.com', '+61400111222', '+61400111333', 'Acme Goods', 'AU, US', '30 tasks', '$299', '~A$1,007/mo', 'https://dashboard.stripe.com/payments/pi_1', 'PRO']) {
+    expect(mail.html).toContain(bit);
+  }
+  expect(mail.text).toContain('Phone: +61400111222');
+});
+
+it('escapes what the seller typed', async () => {
+  await sendFixItPurchaseEmail(purchase);
+  const { html } = mockSendMail.mock.calls[0][0];
+  expect(html).toContain('Ann &lt;b&gt;Lee&lt;/b&gt;');
+  expect(html).not.toContain('<b>Lee</b>');
+});
+
+it('never shows a Google signup\'s placeholder number as their phone', async () => {
+  User.findById.mockReturnValue(leanCatch({ ...ann, phone: '1761550000', whatsapp: '1761550001', needsPhoneUpdate: true, phoneUpdateReason: 'missing' }));
+  await sendFixItPurchaseEmail(purchase);
+  const { html } = mockSendMail.mock.calls[0][0];
+  expect(html).toContain('Not provided (signed up with Google)');
+  expect(html).not.toContain('1761550000');
+});
+
+it('goes where FIXIT_PURCHASE_NOTIFY_EMAIL says, when set', async () => {
+  process.env.FIXIT_PURCHASE_NOTIFY_EMAIL = 'a@esf.com, b@esf.com';
+  await sendFixItPurchaseEmail(purchase);
+  expect(mockSendMail.mock.calls[0][0].to).toEqual(['a@esf.com', 'b@esf.com']);
+});
+
+it('returns false instead of throwing when sending fails', async () => {
+  mockSendMail.mockRejectedValue(new Error('SES down'));
+  expect(await sendFixItPurchaseEmail(purchase)).toBe(false);
+});
+
+describe('the Zoho section', () => {
+  it('names a newly created project, in the subject too', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'done', zohoProjectName: 'Acme Goods', zohoProjectSource: 'created', zohoTaskName: 'Fix it – Standard package: fix 30 tasks (paid $299)' });
+    const mail = mockSendMail.mock.calls[0][0];
+    expect(mail.subject).toBe('Fix it purchase: Standard ($299) — Ann <b>Lee</b> — new Zoho project "Acme Goods"');
+    expect(mail.html).toContain('Acme Goods (new project created for this purchase)');
+    expect(mail.text).toContain('Zoho project: Acme Goods (new project created for this purchase)');
+    expect(mail.text).toContain('Zoho task: Fix it – Standard package');
+  });
+
+  it('says how an existing project was found', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'done', zohoProjectName: 'ACME | Seller Central', zohoProjectSource: 'matched', zohoTaskName: 't' });
+    const mail = mockSendMail.mock.calls[0][0];
+    expect(mail.text).toContain('ACME | Seller Central (found by brand and linked to this account)');
+    expect(mail.subject).not.toContain('new Zoho project');
+  });
+
+  it('asks the team to add the task by hand when Zoho failed', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'failed', zohoError: 'Zoho Projects is not connected' });
+    expect(mockSendMail.mock.calls[0][0].text).toContain('Zoho task: NOT created — Zoho Projects is not connected. Please add it by hand.');
+  });
+
+  it('says there is no Zoho task for a seller who is not an ESF client', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, zohoStatus: 'skipped' });
+    expect(mockSendMail.mock.calls[0][0].text).toContain('Zoho project: Not an ESF client — no Zoho task');
+  });
+});
+
+describe('monthly subscriptions', () => {
+  it('the first month says a subscription started, and how it bills', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, billing: 'monthly', period: 1, periodEnd: '2026-11-27T00:00:00Z' });
+    const mail = mockSendMail.mock.calls[0][0];
+    expect(mail.subject).toBe('Fix it subscription started: Standard ($299/month) — Ann <b>Lee</b>');
+    expect(mail.text).toContain('Billing: Monthly subscription — month 1, covers until Fri, 27 Nov 2026; renews monthly until cancelled');
+    expect(mail.html).toContain('Monthly subscription — month 1');
+  });
+
+  it('a renewal names its month', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, billing: 'monthly', period: 3 });
+    expect(mockSendMail.mock.calls[0][0].subject).toBe('Fix it renewal: Standard, month 3 ($299) — Ann <b>Lee</b>');
+  });
+
+  it('a one-time Trial says so', async () => {
+    await sendFixItPurchaseEmail({ ...purchase, packageName: 'Trial', amount: 25, billing: 'one_time' });
+    expect(mockSendMail.mock.calls[0][0].text).toContain('Billing: One-time');
+  });
+
+  it('tells support when a seller cancels, with how long the team keeps working', async () => {
+    const sub = { userId: 'u1', packageName: 'Standard', tasks: 30, status: 'active', cancelAtPeriodEnd: true, currentPeriodEnd: '2026-11-27T00:00:00Z', stripeSubscriptionId: 'sub_1' };
+    expect(await sendFixItCancellationEmail(sub)).toBe('m1');
+    const mail = mockSendMail.mock.calls[0][0];
+    expect(mail.to).toEqual(['support@estorefactory.com']);
+    expect(mail.subject).toBe('Fix it subscription cancelled: Standard, last paid month ends Fri, 27 Nov 2026 — Ann <b>Lee</b>');
+    expect(mail.text).toContain('It stays active until Fri, 27 Nov 2026; it will not renew after that.');
+    expect(mail.html).toContain('Ann &lt;b&gt;Lee&lt;/b&gt;');
+  });
+});

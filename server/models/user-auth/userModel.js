@@ -165,6 +165,18 @@ const userSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      // Made an ESF client by buying a Fix it package (not by staff): dropped back to a
+      // normal seller when their Fix it ends (Services/Stripe/FixItEsfClient.js).
+      esfViaFixIt: {
+        type: Boolean,
+        default: false,
+      },
+      // Ever bought a Fix it package: keeps the Status page (what the team did) after
+      // they stop being an ESF client.
+      fixItHistory: {
+        type: Boolean,
+        default: false,
+      },
       // Which staff member added this client. Audit only — every ESF staff
       // member can see every ESF client.
       esfAddedBy: {
@@ -175,7 +187,9 @@ const userSchema = new mongoose.Schema(
       },
       // The Zoho project this client's work is tracked in. Projects are created
       // in Zoho, never here — the portal only ever LINKS an existing one, so
-      // these fields mirror a Zoho project rather than owning it. A plain nested
+      // these fields mirror a Zoho project rather than owning it (the one exception:
+      // a Fix it purchase by an unlinked client, Services/Stripe/FixItZohoService.js,
+      // creates one named after their brand). A plain nested
       // path (not a sub-schema) so no stray _id is added.
       // See Services/Zoho/ZohoProjectLinks.js.
       zohoProject: {

@@ -503,7 +503,9 @@ describe('CreateTasksService.createTasksFromErrors — tasks-logics.xlsx detecto
         });
 
         const stored = TaskItem.bulkInsertTasks.mock.calls[0][1].map(t => `${t.asin}:${t.errorType}`);
-        expect(stored).toEqual(['A2:replenishment_needed_S2', 'A1:out_of_stock']);
+        // One stock task per product (TaskIdentity): A1's restock task becomes its
+        // out-of-stock task in place; A2's restock task is untouched.
+        expect(stored).toEqual(['A1:out_of_stock', 'A2:replenishment_needed']);
     });
 });
 
