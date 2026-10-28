@@ -32,6 +32,10 @@
 const { identityKeyOf, severityRank } = require('./TaskIdentity.js');
 
 const COMPLETED_GRACE_DAYS = 7;
+// Work the ESF team closed (a Fix it subtask closed in Zoho) waits at least this long before a
+// still-detected issue reopens it: many fixes take weeks to show on Amazon (account health is
+// averaged over 60-90 days), and reopening sooner sends the team back to work they already did.
+const TEAM_MIN_GRACE_DAYS = 30;
 const DONE_RETENTION_DAYS = 30;
 // lastSeenAt is diagnostic; touching it on every run would rewrite every task of
 // a 25k-task account each time. Refresh it at most this often when nothing else changed.
@@ -323,6 +327,7 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
             $set.reopenedAt = now;
             $set.reopenReason = 'escalated';
             $unset.completedAt = '';
+            $unset.completedBy = '';
             $inc = { reopenCount: 1 };
             summary.escalated++;
         } else if (have.status === 'completed') {
@@ -332,7 +337,8 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
             const completedMs = completedAt ? new Date(completedAt).getTime() : NaN;
             // The spreadsheet's cooldown for this check (TaskCooldowns); 7 days when unlisted.
             // Taken from the problem's CURRENT state, which is what the seller would redo.
-            const graceDays = require('./TaskCooldowns.js').cooldownDaysFor(want);
+            const checkDays = require('./TaskCooldowns.js').cooldownDaysFor(want);
+            const graceDays = have.completedBy === 'esf_team' ? Math.max(checkDays, TEAM_MIN_GRACE_DAYS) : checkDays;
             const graceOver = Number.isFinite(completedMs) && nowMs - completedMs > graceDays * DAY_MS;
             if (!graceOver && !have.completedAt && completedAt) {
                 // Pin the fallback before this write bumps updatedAt: otherwise every
@@ -346,6 +352,7 @@ function planReconcile({ existing = [], desired = [], coverage = {}, priorRailTr
                 $set.reopenedAt = now;
                 $set.reopenReason = 'still_detected';
                 $unset.completedAt = '';
+                $unset.completedBy = '';
                 $inc = { reopenCount: 1 };
                 summary.stillDetected++;
             }
@@ -474,6 +481,7 @@ module.exports = {
     preferStored,
     canonical,
     COMPLETED_GRACE_DAYS,
+    TEAM_MIN_GRACE_DAYS,
     DONE_RETENTION_DAYS,
     LAST_SEEN_TOUCH_HOURS,
     RAIL_SHARE,

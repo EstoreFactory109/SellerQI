@@ -50,7 +50,7 @@ const fixItSyncSoon = (userId, country, region) => {
     FixItZohoSync.syncInBackground(() => FixItZohoSync.syncForMarketplace(userId, country, region), `tasks ${userId} ${country}-${region}`);
 };
 
-const RECONCILE_FIELDS = '_id taskId identityKey asin errorCategory errorType status productName error solution renderData amount amountIsEstimated capitalAmount firstSeenAt lastSeenAt completedAt resolvedAt createdAt updatedAt';
+const RECONCILE_FIELDS = '_id taskId identityKey asin errorCategory errorType status completedBy productName error solution renderData amount amountIsEstimated capitalAmount firstSeenAt lastSeenAt completedAt resolvedAt createdAt updatedAt';
 
 /**
  * Deterministic task id: the same issue in the same marketplace always gets the

@@ -43,6 +43,31 @@ const OPEN = new Set(['pending', 'in_progress']);
 const DONE = new Set(['completed', 'resolved']);
 
 const marker = (taskId) => `[SQI:${taskId}]`;
+// Everything SellerQI writes into Zoho says so, so the team can tell it from a person.
+const SELLERQI_MESSAGE = 'SellerQI message';
+const daysBetween = (a, b) => Math.max(1, Math.round((new Date(b) - new Date(a)) / 86400000));
+
+/** Why SellerQI reopened a subtask the team had closed — posted as a comment on it. */
+const reopenComment = (task, mapping, now) => {
+    const detail = plain(require('../Calculations/CreateTasksService.js').renderTaskIfNeeded(task).error || task.error);
+    const bySystem = task.reopenedAt && mapping.closedAt && new Date(task.reopenedAt) >= new Date(mapping.closedAt);
+    if (!bySystem) return `${SELLERQI_MESSAGE}: reopened — the seller marked this as not done in SellerQI.`;
+    switch (task.reopenReason) {
+        case 'escalated':
+            return `${SELLERQI_MESSAGE}: reopened — this has got worse on Amazon since it was closed. Now: ${detail}`;
+        case 'reappeared':
+            return `${SELLERQI_MESSAGE}: reopened — the problem came back on Amazon. Now: ${detail}`;
+        default:
+            return `${SELLERQI_MESSAGE}: reopened — Amazon still shows this ${daysBetween(mapping.closedAt, now)} days after it was closed. This is a follow-up, not a mistake: please check it again. Now: ${detail}`;
+    }
+};
+
+/** Why SellerQI closed a subtask — posted as a comment on it. */
+const closeComment = (task) => {
+    if (!task) return `${SELLERQI_MESSAGE}: closed — this is no longer one of the seller's SellerQI tasks.`;
+    if (task.status === 'resolved') return `${SELLERQI_MESSAGE}: closed — Amazon no longer shows this problem.`;
+    return `${SELLERQI_MESSAGE}: closed — the seller marked this done in SellerQI.`;
+};
 const normTitle = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const hashOf = (...parts) => crypto.createHash('sha1').update(parts.map((p) => String(p ?? '')).join('\u001f')).digest('hex').slice(0, 16);
 const money = (n) => (Number(n) > 0 ? `$${Math.round(Number(n)).toLocaleString('en-US')}` : null);
@@ -72,6 +97,8 @@ const subtaskContent = (task) => {
     const title = `${label}${subject ? ` — ${subject}` : ''}`.slice(0, 240);
     const amount = money(task.amount);
     const description = [
+        `${SELLERQI_MESSAGE} — added automatically from the seller's SellerQI tasks.`,
+        '',
         error,
         plain(rendered.solution || task.solution) ? `How to fix: ${plain(rendered.solution || task.solution)}` : null,
         amount ? `Worth about ${amount}/month to the seller.` : null,
@@ -83,6 +110,8 @@ const subtaskContent = (task) => {
 };
 
 const parentDescription = (wo, done, total, openTitles) => [
+    `${SELLERQI_MESSAGE} — kept up to date automatically.`,
+    '',
     `Fix it ${wo.packageName}${wo.kind === 'subscription' ? ` subscription — ${wo.tasksPerPeriod} tasks a month, month ${wo.monthsPaid}` : ` — ${wo.tasksPerPeriod} tasks`}.`,
     `Progress: ${done} of ${total} done (paid for ${wo.quota}).`,
     wo.status !== 'active' ? (wo.status === 'ending' ? 'The seller has cancelled: no new tasks will be added after this month.' : 'The subscription has ended.') : null,
@@ -115,6 +144,10 @@ async function syncWorkOrder(wo, { now = new Date() } = {}) {
     if (!release) { summary.skipped = 'locked'; return summary; }
     try {
         const zoho = { projectId: wo.zohoProjectId, portalId: wo.portalId };
+        // A comment that fails to post never undoes the status change it explains.
+        const comment = (taskId, text) => Promise.resolve()
+            .then(() => ZohoProjectsService.postTaskComment({ ...zoho, taskId, comment: text }))
+            .catch((error) => logger.warn(`[FixItZohoSync] comment on ${taskId} not posted: ${error.message}`));
         const subtasks = await ZohoProjectsService.listSubtasks({ ...zoho, parentTaskId: wo.zohoParentTaskId });
         const zById = new Map(subtasks.map((z) => [String(z.id), z]));
         const mappings = await FixItSubtask.find({ workOrderId: wo._id }).lean();
@@ -158,6 +191,7 @@ async function syncWorkOrder(wo, { now = new Date() } = {}) {
                     state = 'closed'; closedBy = 'zoho'; summary.completedInSellerQI++;
                 } else if (!zClosed && tDone) {
                     await ZohoProjectsService.closeTask({ ...zoho, taskId: m.zohoSubtaskId });
+                    await comment(m.zohoSubtaskId, closeComment(task));
                     state = 'closed'; closedBy = 'sellerqi'; summary.closedInZoho++;
                 } else if (zClosed && tDone) {
                     state = 'closed'; closedBy = closedBy || 'zoho';
@@ -168,6 +202,7 @@ async function syncWorkOrder(wo, { now = new Date() } = {}) {
                     state = 'open'; closedBy = null; summary.reopenedInSellerQI++;
                 } else if (zClosed && !tDone && wo.zohoOpenStatusId) {
                     await ZohoProjectsService.reopenTask({ ...zoho, taskId: m.zohoSubtaskId, openStatusId: wo.zohoOpenStatusId });
+                    await comment(m.zohoSubtaskId, reopenComment(task, m, now));
                     state = 'open'; closedBy = null; summary.reopenedInZoho++;
                 } else if (!zClosed && !tDone) {
                     state = 'open'; closedBy = null;
@@ -175,7 +210,7 @@ async function syncWorkOrder(wo, { now = new Date() } = {}) {
             }
 
             const set = {};
-            if (state !== m.state) Object.assign(set, { state, closedBy });
+            if (state !== m.state) Object.assign(set, { state, closedBy, ...(state === 'closed' ? { closedAt: now } : {}) });
             if (state === 'open' && task) {
                 const content = subtaskContent(task);
                 if (content.hash !== m.contentHash) {
@@ -320,5 +355,8 @@ module.exports = {
     subtaskContent,
     parentDescription,
     marker,
+    reopenComment,
+    closeComment,
+    SELLERQI_MESSAGE,
     ENDED_GRACE_DAYS,
 };

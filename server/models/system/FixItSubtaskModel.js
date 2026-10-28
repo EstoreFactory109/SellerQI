@@ -21,6 +21,8 @@ const fixItSubtaskSchema = new mongoose.Schema(
         // removed: the team deleted it in Zoho (never recreated; still counts toward the quota)
         state: { type: String, enum: ['creating', 'open', 'closed', 'removed'], default: 'creating' },
         closedBy: { type: String, enum: ['zoho', 'sellerqi', null], default: null },
+        // When it was last closed (either side): "Amazon still shows this N days after it was closed".
+        closedAt: { type: Date, default: null },
         adoptedBy: { type: String, enum: ['marker', 'title', 'ai', null], default: null },
         claimedAt: { type: Date, default: () => new Date() },
         lastSyncedAt: { type: Date, default: null },

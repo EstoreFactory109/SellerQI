@@ -10,7 +10,7 @@
  * deleted is never recreated; a cancelled work order is synced but not topped up; an ended one
  * stops after the grace period; the parent shows "N of M done".
  */
-const mockZoho = { subtasks: [], seq: 0, calls: [] };
+const mockZoho = { subtasks: [], seq: 0, calls: [], comments: [] };
 const mockStore = { subtasks: [], tasks: [], orders: [] };
 const mockAi = { matches: new Map() };
 
@@ -68,6 +68,7 @@ jest.mock('../../../Services/Zoho/ZohoProjectsService.js', () => ({
   },
   closeTask: async ({ taskId }) => { const s = mockZoho.subtasks.find((x) => x.id === taskId); if (s) s.statusIsClosed = true; mockZoho.calls.push(['close', taskId]); },
   reopenTask: async ({ taskId }) => { const s = mockZoho.subtasks.find((x) => x.id === taskId); if (s) s.statusIsClosed = false; mockZoho.calls.push(['reopen', taskId]); },
+  postTaskComment: async ({ taskId, comment }) => { mockZoho.comments.push({ taskId, comment }); },
 }));
 
 const sync = require('../../../Services/Stripe/FixItZohoSync.js');
@@ -91,7 +92,7 @@ const zohoFor = (taskId) => mockZoho.subtasks.find((s) => s.id === mappingFor(ta
 
 beforeEach(() => {
   mockReleased.length = 0;
-  mockZoho.subtasks.length = 0; mockZoho.seq = 0; mockZoho.calls.length = 0;
+  mockZoho.subtasks.length = 0; mockZoho.seq = 0; mockZoho.calls.length = 0; mockZoho.comments.length = 0;
   mockStore.subtasks.length = 0; mockStore.orders.length = 0;
   mockAi.matches = new Map();
   mockStore.tasks.splice(0, mockStore.tasks.length, task(1, 50), task(2, 900), task(3, 10), task(4, 300), task(5, 0, { status: 'completed' }));
@@ -207,6 +208,54 @@ describe('status, both ways', () => {
     const out = await run();
     expect(out).toMatchObject({ done: 1, total: 3 });
     expect(mockZoho.calls).toContainEqual(['update', 'PARENT']);
+  });
+});
+
+describe('SellerQI messages in Zoho', () => {
+  beforeEach(async () => { await run(); mockZoho.comments.length = 0; });
+  const commentsOn = (taskId) => mockZoho.comments.filter((c) => c.taskId === mappingFor(taskId).zohoSubtaskId).map((c) => c.comment);
+
+  it('every subtask and the parent say they come from SellerQI', () => {
+    expect(zohoFor('task_2').description.startsWith('SellerQI message — added automatically')).toBe(true);
+  });
+
+  it('closing a subtask says why: the seller did it, or Amazon no longer shows it', async () => {
+    mockStore.tasks.find((t) => t.taskId === 'task_2').status = 'completed';
+    mockStore.tasks.find((t) => t.taskId === 'task_4').status = 'resolved';
+    await run();
+    expect(commentsOn('task_2')).toEqual(['SellerQI message: closed — the seller marked this done in SellerQI.']);
+    expect(commentsOn('task_4')).toEqual(['SellerQI message: closed — Amazon no longer shows this problem.']);
+  });
+
+  it('reopening a subtask the team closed says Amazon still shows it, and for how long', async () => {
+    zohoFor('task_2').statusIsClosed = true;
+    await run(); // team closed it -> SellerQI task completed
+    const closedAt = mappingFor('task_2').closedAt;
+    // 31 days later the planner reopens it: still detected.
+    Object.assign(mockStore.tasks.find((t) => t.taskId === 'task_2'), { status: 'pending', reopenReason: 'still_detected', reopenedAt: new Date(closedAt.getTime() + 31 * 86400000) });
+    mappingFor('task_2').closedAt = new Date(Date.now() - 31 * 86400000);
+    await run();
+    const [msg] = commentsOn('task_2');
+    expect(msg).toMatch(/^SellerQI message: reopened — Amazon still shows this 31 days after it was closed\. This is a follow-up, not a mistake/);
+    expect(msg).toContain('Now: Profitability | Selling at a loss: product 2');
+  });
+
+  it('a seller who un-ticks a task is named as the reason', async () => {
+    mockStore.tasks.find((t) => t.taskId === 'task_4').status = 'completed';
+    await run();
+    mockStore.tasks.find((t) => t.taskId === 'task_4').status = 'pending';
+    await run();
+    expect(commentsOn('task_4')).toContain('SellerQI message: reopened — the seller marked this as not done in SellerQI.');
+  });
+
+  it('a comment that fails to post never undoes the status change', async () => {
+    const Zoho = require('../../../Services/Zoho/ZohoProjectsService.js');
+    const original = Zoho.postTaskComment;
+    Zoho.postTaskComment = async () => { throw new Error('rate limited'); };
+    mockStore.tasks.find((t) => t.taskId === 'task_1').status = 'completed';
+    expect((await run()).closedInZoho).toBe(1);
+    expect(mappingFor('task_1').state).toBe('closed');
+    Zoho.postTaskComment = original;
   });
 });
 

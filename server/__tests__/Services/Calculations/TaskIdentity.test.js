@@ -159,3 +159,29 @@ describe('the planner keeps one row per problem', () => {
         expect(ops[0].insertOne.document.identityKey).toBe(id('ACCOUNT', 'account', 'accountStatus'));
     });
 });
+
+describe('work the ESF team closed gets time to show on Amazon', () => {
+    const NOW = new Date('2026-10-28T12:00:00Z');
+    const daysAgo = (n) => new Date(NOW.getTime() - n * 86400000);
+    const plan = (have, want) => planReconcile({ existing: [have], desired: [want], coverage: { account: true }, scope: { userId: 'u1', country: 'US', region: 'NA' }, now: NOW });
+    const odr = { asin: 'ACCOUNT', errorCategory: 'account', errorType: 'orderWithDefectsStatus', productName: 'Account Health', amount: 0 };
+
+    it('an account metric the team fixed stays done for 30 days, not 1', () => {
+        const have = { _id: 'r1', ...odr, status: 'completed', completedBy: 'esf_team', completedAt: daysAgo(5), lastSeenAt: daysAgo(1) };
+        expect(plan(have, { ...odr, taskId: 't' }).summary.stillDetected).toBe(0);
+        const later = plan({ ...have, completedAt: daysAgo(31) }, { ...odr, taskId: 't' });
+        expect(later.summary.stillDetected).toBe(1);
+        expect(later.ops[0].updateOne.update.$unset).toMatchObject({ completedBy: '' });
+    });
+
+    it('the seller\'s own ticks keep the check\'s own waiting period', () => {
+        const have = { _id: 'r1', ...odr, status: 'completed', completedAt: daysAgo(5), lastSeenAt: daysAgo(1) };
+        expect(plan(have, { ...odr, taskId: 't' }).summary.stillDetected).toBe(1);
+    });
+
+    it('a longer check keeps its own longer wait (90 days for A+ content)', () => {
+        const aplus = { asin: 'B01', errorCategory: 'conversion', errorType: 'missing_aplus_content', productName: 'Mug', amount: 0 };
+        const have = { _id: 'r2', ...aplus, status: 'completed', completedBy: 'esf_team', completedAt: daysAgo(60), lastSeenAt: daysAgo(1) };
+        expect(planReconcile({ existing: [have], desired: [{ ...aplus, taskId: 't' }], coverage: { conversion: true, 'conversion.aplus': true }, scope: { userId: 'u1', country: 'US', region: 'NA' }, now: NOW }).summary.stillDetected).toBe(0);
+    });
+});
