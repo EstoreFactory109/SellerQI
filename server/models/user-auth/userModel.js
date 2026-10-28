@@ -165,6 +165,18 @@ const userSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      // Made an ESF client by buying a Fix it package (not by staff): dropped back to a
+      // normal seller when their Fix it ends (Services/Stripe/FixItEsfClient.js).
+      esfViaFixIt: {
+        type: Boolean,
+        default: false,
+      },
+      // Ever bought a Fix it package: keeps the Status page (what the team did) after
+      // they stop being an ESF client.
+      fixItHistory: {
+        type: Boolean,
+        default: false,
+      },
       // Which staff member added this client. Audit only — every ESF staff
       // member can see every ESF client.
       esfAddedBy: {

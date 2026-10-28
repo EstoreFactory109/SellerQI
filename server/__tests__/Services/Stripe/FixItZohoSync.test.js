@@ -50,6 +50,8 @@ jest.mock('../../../models/system/FixItSubtaskModel.js', () => fake(() => mockSt
 jest.mock('../../../models/MCP/TaskItemModel.js', () => fake(() => mockStore.tasks));
 jest.mock('../../../models/system/FixItWorkOrderModel.js', () => fake(() => mockStore.orders));
 jest.mock('../../../utils/mongoLock.js', () => ({ acquireLock: async () => async () => {} }));
+const mockReleased = [];
+jest.mock('../../../Services/Stripe/FixItEsfClient.js', () => ({ release: async (userId) => { mockReleased.push(userId); return true; } }));
 jest.mock('../../../Services/AI/FixItSubtaskMatcher.js', () => ({ matchSubtasks: async () => new Map(mockAi.matches) }));
 jest.mock('../../../Services/Calculations/CreateTasksService.js', () => ({ renderTaskIfNeeded: (t) => t }));
 jest.mock('../../../Services/Calculations/TaskPrioritizationService.js', () => ({ getTaskPriorityMeta: (t) => ({ impactWeight: t.impactWeight || 0, effortMinutes: 15 }) }));
@@ -88,6 +90,7 @@ const mappingFor = (taskId) => mockStore.subtasks.find((m) => m.taskId === taskI
 const zohoFor = (taskId) => mockZoho.subtasks.find((s) => s.id === mappingFor(taskId)?.zohoSubtaskId);
 
 beforeEach(() => {
+  mockReleased.length = 0;
   mockZoho.subtasks.length = 0; mockZoho.seq = 0; mockZoho.calls.length = 0;
   mockStore.subtasks.length = 0; mockStore.orders.length = 0;
   mockAi.matches = new Map();
@@ -208,6 +211,22 @@ describe('status, both ways', () => {
 });
 
 describe('when it stops', () => {
+  it('a Trial ends when the team has done its tasks: the seller goes back to normal', async () => {
+    await run({ kind: 'trial', quota: 2, key: 'purchase:p1' });
+    for (const m of mockStore.subtasks) mockZoho.subtasks.find((z) => z.id === m.zohoSubtaskId).statusIsClosed = true;
+    const out = await run({ kind: 'trial', quota: 2, key: 'purchase:p1' });
+    expect(out.trialEnded).toBe(true);
+    expect(mockStore.orders[0]).toMatchObject({ status: 'ended' });
+    expect(mockReleased).toEqual(['u1']);
+  });
+
+  it('a Trial with tasks still open is not over, unless it is 30 days old', async () => {
+    await run({ kind: 'trial', quota: 2, key: 'purchase:p1' });
+    expect((await run({ kind: 'trial', quota: 2, key: 'purchase:p1' })).trialEnded).toBeUndefined();
+    const old = await run({ kind: 'trial', quota: 2, key: 'purchase:p1', createdAt: new Date(Date.now() - 31 * 86400000) });
+    expect(old.trialEnded).toBe(true);
+  });
+
   it('an ended work order is left alone after the grace period', async () => {
     const out = await run({ status: 'ended', endedAt: new Date(Date.now() - 40 * 86400000) });
     expect(out.skipped).toBe('ended');

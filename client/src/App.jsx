@@ -297,9 +297,12 @@ const App = () => {
                 EsfClientOnlyRoute applies the server's own esfClientOnly rule, so the
                 answer is a redirect rather than a shell that renders and then 403s on
                 every request it makes. */}
+            {/* The Status page stays open, read-only, to a past Fix it buyer. */}
+            <Route element={<EsfClientOnlyRoute allowFixItHistory />}>
+              <Route path='estore-factory/status' element={<EstoreFactoryStatus />} />
+            </Route>
             <Route element={<EsfClientOnlyRoute />}>
               <Route path='client-dashboard' element={<EsfClientDashboard />} />
-              <Route path='estore-factory/status' element={<EstoreFactoryStatus />} />
               <Route path='estore-factory/untapped' element={<EstoreFactoryUntapped />} />
               <Route path='estore-factory/reports' element={<EstoreFactoryReports />} />
               {/* Keyless path kept so older links still resolve; the page falls back

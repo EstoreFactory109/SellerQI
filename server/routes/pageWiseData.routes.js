@@ -314,7 +314,8 @@ router.get('/esf/client-dashboard', auth, esfClientOnly, getLocationOptional, an
 // The Status page reads the nightly Zoho task sync. No getLocation: this is
 // project data, not marketplace data, so it has no country/region dimension.
 // Cached briefly because the underlying rows only change once a day anyway.
-router.get('/esf/project-status', auth, esfClientOnly, analyseDataCache(300, 'esf-project-status'), getEsfProjectStatus);
+// Read-only, so a past Fix it buyer keeps it too (esfClientOnly.orFixItHistory).
+router.get('/esf/project-status', auth, esfClientOnly.orFixItHistory, analyseDataCache(300, 'esf-project-status'), getEsfProjectStatus);
 
 // The Untapped page, from the same nightly Zoho sync. No getLocation, for the same
 // reason as the Status route above.
@@ -423,8 +424,8 @@ router.post(
  * Binary responses: deliberately NOT behind analyseDataCache, which would corrupt them, as
  * with the invoice PDF route. Scoped to the client's own project inside the controller.
  */
-router.get('/esf/project-status/files/:key', auth, esfClientOnly, downloadDeliverable);
-router.get('/esf/project-status/tasks/:taskId/files.zip', auth, esfClientOnly, downloadTaskZip);
+router.get('/esf/project-status/files/:key', auth, esfClientOnly.orFixItHistory, downloadDeliverable);
+router.get('/esf/project-status/tasks/:taskId/files.zip', auth, esfClientOnly.orFixItHistory, downloadTaskZip);
 router.post('/esf/project-status/files/:key/visibility', auth, esfClientOnly, setDeliverableVisibility);
 
 // ===== ISSUES PAGE =====

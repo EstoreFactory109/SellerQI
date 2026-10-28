@@ -34,6 +34,8 @@ const { acquireLock } = require('../../utils/mongoLock.js');
 const logger = require('../../utils/Logger.js');
 
 const LOCK_TTL_MS = 10 * 60 * 1000;
+// A Trial is over when its tasks are all done, or this long after it was bought.
+const TRIAL_MAX_DAYS = 30;
 const CLAIM_STALE_MS = 10 * 60 * 1000;
 const ENDED_GRACE_DAYS = 30;
 const MAX_CREATES_PER_RUN = 80; // a big first batch finishes on the next run, not in one burst
@@ -249,7 +251,16 @@ async function syncWorkOrder(wo, { now = new Date() } = {}) {
             await ZohoProjectsService.updateTask({ ...zoho, taskId: wo.zohoParentTaskId, description });
             woSet.parentContentHash = parentHash;
         }
+        // A Trial ends when the team has done its tasks (or after TRIAL_MAX_DAYS): the seller
+        // stops being an ESF client unless they have something else running.
+        const trialOver = wo.kind === 'trial' && wo.status === 'active'
+            && ((after.length > 0 && done === after.length) || (wo.createdAt && now - new Date(wo.createdAt) > TRIAL_MAX_DAYS * 86400000));
+        if (trialOver) Object.assign(woSet, { status: 'ended', endedAt: now });
         await FixItWorkOrder.updateOne({ _id: wo._id }, { $set: woSet });
+        if (trialOver) {
+            summary.trialEnded = true;
+            await require('./FixItEsfClient.js').release(wo.userId);
+        }
         Object.assign(summary, { done, total: after.length });
         if (summary.created || summary.adopted || summary.completedInSellerQI || summary.closedInZoho || summary.reopenedInZoho || summary.reopenedInSellerQI) {
             logger.info('[FixItZohoSync] synced', summary);

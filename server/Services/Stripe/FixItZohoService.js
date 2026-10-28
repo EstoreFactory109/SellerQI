@@ -272,6 +272,8 @@ const onSubscriptionChanged = async (sub) => {
         { key: sub.stripeSubscriptionId, status: { $ne: status } },
         { $set: { status, endedAt: ended ? (sub.endedAt || new Date()) : null } }
     );
+    // Back to a normal seller once nothing of theirs is running (history kept).
+    if (ended && sub.userId) await require('./FixItEsfClient.js').release(sub.userId);
 };
 
 module.exports = { addFixItTaskToZoho, onSubscriptionChanged, findExistingProject, workOrderKey, TASKLIST_NAME };

@@ -785,10 +785,16 @@ const Status = () => {
                     </p>
                 </header>
 
+                {board?.readOnly && (
+                    <p role="status" className="m-0 rounded-lg px-4 py-3 text-[13px]" style={{ background: PALETTE.surface, border: `1px solid ${PALETTE.dividerFaint}`, color: PALETTE.textSecondary }}>
+                        Your Fix it package has ended. This is the record of what the team did for you — buy a package again from the Tasks page to have them pick up more.
+                    </p>
+                )}
+
                 {/* Only rendered when something is actually outstanding — an
                     empty amber "Waiting on you" banner reads as a warning about
                     nothing. */}
-                {waitingOnYou.length > 0 && (
+                {waitingOnYou.length > 0 && !board?.readOnly && (
                     <section className="rounded-lg" style={{ background: PALETTE.amberBg, border: `1px solid ${PALETTE.amberBorder}`, padding: '20px 24px 8px' }}>
                         <div className="flex items-center gap-2.5 pb-1.5 flex-wrap">
                             <span className="w-[7px] h-[7px] rounded-full" style={{ background: PALETTE.amberValue }} />
@@ -825,14 +831,16 @@ const Status = () => {
                         <span className="flex-1 text-[12.5px]" style={{ color: PALETTE.textMuted }}>
                             {loading ? 'Loading…' : `${inProgress.length} task${inProgress.length === 1 ? '' : 's'} · your team is handling these`}
                         </span>
-                        <button
-                            type="button"
-                            onClick={() => setFormOpen((v) => !v)}
-                            className="flex-none text-[12.5px] font-bold px-[15px] py-2.5 rounded-lg"
-                            style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
-                        >
-                            ＋ Request a task
-                        </button>
+                        {!board?.readOnly && (
+                            <button
+                                type="button"
+                                onClick={() => setFormOpen((v) => !v)}
+                                className="flex-none text-[12.5px] font-bold px-[15px] py-2.5 rounded-lg"
+                                style={{ background: PALETTE.accent, color: PALETTE.onAccentText }}
+                            >
+                                ＋ Request a task
+                            </button>
+                        )}
                     </div>
 
                     {formOpen && (

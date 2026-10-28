@@ -35,6 +35,8 @@ jest.mock('../../../models/system/FixItWorkOrderModel.js', () => {
     },
   };
 });
+const mockReleased = [];
+jest.mock('../../../Services/Stripe/FixItEsfClient.js', () => ({ release: async (id) => { mockReleased.push(id); } }));
 const mockSync = { calls: [] };
 jest.mock('../../../Services/Stripe/FixItZohoSync.js', () => ({
   syncWorkOrderById: async (id) => { mockSync.calls.push(id); return { total: 2, done: 0 }; },
@@ -55,7 +57,7 @@ const ZohoTaskSync = require('../../../Services/Zoho/ZohoTaskSync.js');
 const Zoho = require('../../../Services/Zoho/ZohoProjectsService.js');
 const Links = require('../../../Services/Zoho/ZohoProjectLinks.js');
 const Matcher = require('../../../Services/AI/FixItProjectMatcher.js');
-const { addFixItTaskToZoho } = require('../../../Services/Stripe/FixItZohoService.js');
+const { addFixItTaskToZoho, onSubscriptionChanged } = require('../../../Services/Stripe/FixItZohoService.js');
 
 const lean = (value) => ({ select: () => ({ lean: async () => value }) });
 const purchase = {
@@ -208,4 +210,13 @@ it('when another client owns a project with the brand\'s exact name, the new one
   UserModel.find.mockReturnValue(lean([{ zohoProject: { projectId: '700' } }]));
   await addFixItTaskToZoho(purchase);
   expect(Zoho.createProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'Acme Goods – Ann Lee' }));
+});
+
+it('the work order follows the subscription, and an ended one sends the seller back to normal', async () => {
+  mockReleased.length = 0;
+  mockWorkOrders.push({ _id: 'wo9', key: 'sub_9', status: 'active', userId: 'u1' });
+  await onSubscriptionChanged({ stripeSubscriptionId: 'sub_9', userId: 'u1', status: 'active', cancelAtPeriodEnd: true });
+  expect(mockReleased).toEqual([]);
+  await onSubscriptionChanged({ stripeSubscriptionId: 'sub_9', userId: 'u1', status: 'canceled', cancelAtPeriodEnd: true });
+  expect(mockReleased).toEqual(['u1']);
 });

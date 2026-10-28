@@ -33,10 +33,15 @@ import { Navigate, Outlet } from 'react-router-dom';
  * every hard refresh, so an absent user renders through and the server stays the
  * backstop for the moment it takes to arrive.
  */
-const EsfClientOnlyRoute = () => {
+/**
+ * `allowFixItHistory`: the Status page (read-only) also opens for a seller who was an ESF
+ * client through a Fix it package that has since ended — server/middlewares/Auth/esfClientOnly.js
+ * orFixItHistory.
+ */
+const EsfClientOnlyRoute = ({ allowFixItHistory = false }) => {
   const user = useSelector((state) => state.Auth?.user);
 
-  if (user && user.isEsfClient !== true) {
+  if (user && user.isEsfClient !== true && !(allowFixItHistory && user.fixItHistory === true)) {
     return <Navigate to="/seller-central-checker/dashboard" replace />;
   }
 

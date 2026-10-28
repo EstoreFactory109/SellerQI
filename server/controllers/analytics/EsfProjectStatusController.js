@@ -195,7 +195,7 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
     const userId = req.userId;
 
     try {
-        const user = await UserModel.findById(userId).select('zohoProject').lean();
+        const user = await UserModel.findById(userId).select('zohoProject isEsfClient').lean();
         const projectId = user?.zohoProject?.projectId;
 
         if (!projectId) {
@@ -300,6 +300,8 @@ const getEsfProjectStatus = asyncHandler(async (req, res) => {
             // ATTACHMENTS_ENABLED. Sent rather than hardcoded so turning uploads on is
             // an env change, not a release.
             canAttachFiles: ATTACHMENTS_ENABLED,
+            // A past Fix it buyer (no longer an ESF client) sees the record, not the controls.
+            readOnly: user.isEsfClient !== true,
             taskRequests: await loadTaskRequests(userId),
             openMessageCount: await countOpenThreads(userId),
         }, 'Project status fetched successfully'));

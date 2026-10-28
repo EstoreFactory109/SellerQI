@@ -199,6 +199,13 @@ const runZohoOnce = async (purchaseId) => {
  * (Stripe wants a quick answer) nor the success page waits on Zoho and the AI.
  */
 const runAfterPayment = async (purchaseId) => {
+    // The team is about to work on their tasks: they are an ESF client from now on.
+    try {
+        const paid = await FixItPurchase.findById(purchaseId).select('userId').lean();
+        if (paid?.userId) await require('./FixItEsfClient.js').enroll(paid.userId);
+    } catch (error) {
+        logger.warn(`[FixIt] could not make the buyer of ${purchaseId} an ESF client: ${error.message}`);
+    }
     try {
         await runZohoOnce(purchaseId);
     } catch (error) {
