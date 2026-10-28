@@ -527,7 +527,12 @@ const createTask = async ({ projectId, name, description, startDate, endDate, ta
      * while v3 is unverified, so the retry below drops it if Zoho objects. Where a
      * task is filed must never be the reason approving work fails.
      */
-    if (tasklistId) body.tasklist_id = String(tasklistId);
+    // v3 takes the list as an object; `tasklist_id` (the v2 name) is refused on v3 with
+    // "Enter a valid custom field" — seen live 2026-10-28.
+    if (tasklistId) {
+        if (spec.version === 'v2') body.tasklist_id = String(tasklistId);
+        else body.tasklist = { id: String(tasklistId) };
+    }
     /**
      * Sent as a pair, never end alone — see the header. A caller that supplies only an
      * end date gets both, starting today, because "due by X" with no start is exactly
@@ -583,7 +588,8 @@ const createTask = async ({ projectId, name, description, startDate, endDate, ta
     try {
         response = await send(body);
     } catch (error) {
-        if (!isDateFormatRejection(error)) throw error;
+        // A named field refusal is retryable whatever its title (PATTERN_NOT_MATCHED etc.).
+        if (!isDateFormatRejection(error) && !(error?.statusCode === 400 && error.zohoFields?.length)) throw error;
 
         /**
          * Two things in this payload are unverified, and the rejection does not say which
@@ -594,8 +600,20 @@ const createTask = async ({ projectId, name, description, startDate, endDate, ta
          * field was at fault would be a third failed accept for the admin watching.
          * Whichever it was, the task lands — unfiled if it has to be, and the log says so.
          */
-        const alternate = body.end_date || body.start_date ? legacyDates(body) : null;
-        const droppingTasklist = Boolean(body.tasklist_id);
+        /*
+         * When Zoho names the field it refused, change only that. Seen live 2026-10-28: the
+         * tasklist was refused, the old replay ALSO switched the (correct) ISO dates to
+         * MM-DD-YYYY, and v3 refused those with PATTERN_NOT_MATCHED — so a task that only
+         * needed its list dropped was never created at all.
+         */
+        const refused = (error.zohoFields || []).map((f) => String(f).toLowerCase());
+        const hasTasklist = Boolean(body.tasklist_id || body.tasklist);
+        const tasklistRefused = refused.some((f) => f.startsWith('tasklist'));
+        const datesRefused = refused.some((f) => f === 'start_date' || f === 'end_date');
+        const knowsField = refused.length > 0;
+
+        const alternate = (!knowsField || datesRefused) && (body.end_date || body.start_date) ? legacyDates(body) : null;
+        const droppingTasklist = hasTasklist && (!knowsField || tasklistRefused);
         if (!alternate && !droppingTasklist) throw error;
 
         logger.warn(
@@ -607,7 +625,10 @@ const createTask = async ({ projectId, name, description, startDate, endDate, ta
         // form-encoded, and URLSearchParams turns an undefined value into the literal
         // string "undefined" rather than omitting the field.
         const replay = { ...body, ...(alternate || {}) };
-        if (droppingTasklist) delete replay.tasklist_id;
+        if (droppingTasklist) {
+            delete replay.tasklist_id;
+            delete replay.tasklist;
+        }
         response = await send(replay);
     }
 

@@ -644,6 +644,46 @@ describe('createTask — the one retry in the other date dialect', () => {
 
         expect(axios).toHaveBeenCalledTimes(1);
     });
+
+    test('v3 gets the tasklist as an object, not tasklist_id', async () => {
+        axios.mockResolvedValueOnce({ data: okTask });
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Filed', tasklistId: 'L1' });
+        expect(axios.mock.calls[0][0].data.tasklist).toEqual({ id: 'L1' });
+        expect(axios.mock.calls[0][0].data).not.toHaveProperty('tasklist_id');
+    });
+
+    test('live 2026-10-28: a refused tasklist is dropped and the ISO dates are KEPT', async () => {
+        // The old replay also switched the correct ISO dates to MM-DD-YYYY, which v3
+        // refused with PATTERN_NOT_MATCHED on start_date — so the task was never created.
+        axios.mockRejectedValueOnce(httpError(400, { error: {
+            title: 'INVALID_PARAMETER_VALUE', error_type: 'FIELDS_VALIDATION_ERROR',
+            details: [{ message: 'Enter a valid custom field.', field_name: 'tasklist_id' }],
+        } })).mockResolvedValueOnce({ data: okTask });
+
+        const task = await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Fix it', tasklistId: 'L1', endDate: '2099-12-31' });
+
+        const retry = axios.mock.calls[1][0].data;
+        expect(retry).not.toHaveProperty('tasklist');
+        expect(retry).not.toHaveProperty('tasklist_id');
+        expect(retry.end_date).toBe('2099-12-31T12:00:00.000Z');
+        expect(task.id).toBe('task-9');
+    });
+
+    test('a refused date keeps the tasklist and only switches the dates', async () => {
+        axios.mockRejectedValueOnce(formatRejection()).mockResolvedValueOnce({ data: okTask });
+        await ZohoProjectsService.createTask({ projectId: 'p1', name: 'Fix it', tasklistId: 'L1', endDate: '2099-12-31' });
+        const retry = axios.mock.calls[1][0].data;
+        expect(retry.end_date).toBe('12-31-2099');
+        expect(retry.tasklist).toEqual({ id: 'L1' });
+    });
+
+    test('a refused field we cannot fix (e.g. name) is not retried', async () => {
+        axios.mockRejectedValue(httpError(400, { error: {
+            title: 'PATTERN_NOT_MATCHED', details: [{ message: 'bad', field_name: 'name' }],
+        } }));
+        await expect(ZohoProjectsService.createTask({ projectId: 'p1', name: 'x', tasklistId: 'L1', endDate: '2099-12-31' })).rejects.toThrow();
+        expect(axios).toHaveBeenCalledTimes(1);
+    });
 });
 
 describe('createTask — the status a new task lands in', () => {
