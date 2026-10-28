@@ -409,6 +409,34 @@ const parseDayWiseSummary = (text) => {
  * A task's detail: the day-by-day summary with each day's delivered files under it, then the
  * remaining files and "Download all". Shared by In progress rows and Completed rows.
  */
+/** A Fix it task carries the seller's tasks as subtasks: "12 of 30 done". */
+const FixItProgressPill = ({ fixIt }) => (fixIt && fixIt.total > 0 ? (
+    <span
+        className="flex-none text-[10.5px] font-semibold rounded px-[7px] py-[2px] whitespace-nowrap"
+        style={{ background: 'rgba(59,130,246,.14)', color: PALETTE.accentLight }}
+        title="Your tasks from SellerQI that the team is fixing under this package"
+    >
+        {fixIt.done} of {fixIt.total} done
+    </span>
+) : null);
+
+/** The seller's tasks under a Fix it task, open ones first. */
+const FixItSubtaskList = ({ fixIt }) => (fixIt && fixIt.subtasks?.length ? (
+    <div className="rounded-lg p-3" style={{ background: 'rgba(255,255,255,.02)', border: `1px solid ${PALETTE.dividerFaint}` }}>
+        <p className="m-0 mb-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: PALETTE.textMuted }}>
+            Your tasks in this package — {fixIt.done} of {fixIt.total} done
+        </p>
+        <ul className="m-0 p-0 list-none flex flex-col gap-1.5">
+            {fixIt.subtasks.map((sub) => (
+                <li key={sub.id} className="flex items-start gap-2 text-[12.5px]" style={{ color: sub.done ? PALETTE.textMuted : PALETTE.textBody }}>
+                    <span aria-hidden="true" style={{ color: sub.done ? PALETTE.good : PALETTE.textFaint }}>{sub.done ? '✓' : '○'}</span>
+                    <span style={sub.done ? { textDecoration: 'line-through' } : undefined}>{sub.name}</span>
+                </li>
+            ))}
+        </ul>
+    </div>
+) : null);
+
 const TaskDetail = ({ task, canManage, onDeliverableChange }) => {
     const dayWise = task.summary ? parseDayWiseSummary(task.summary) : null;
     const deliverables = task.deliverables || [];
@@ -423,6 +451,7 @@ const TaskDetail = ({ task, canManage, onDeliverableChange }) => {
 
     return (
         <div className="flex flex-col gap-3">
+            <FixItSubtaskList fixIt={task.fixIt} />
             {dayWise ? (
                 <div className="max-w-[80ch]">
                     {dayWise.days.map((day, i) => {
@@ -559,6 +588,7 @@ const TaskRow = ({ task, isFirst, canManage, onDeliverableChange }) => {
                 <span className="text-xs truncate" style={{ color: PALETTE.textMuted }}>{task.tasklist || '-'}</span>
                 <span className="flex items-center gap-2 min-w-0">
                     <span className="text-[13.5px] min-w-0 truncate" style={{ color: PALETTE.textBody }} title={task.name}>{task.name}</span>
+                    <FixItProgressPill fixIt={task.fixIt} />
                     <DeliverableCount items={deliverables} />
                 </span>
                 <span className="justify-self-start text-[11.5px] font-semibold rounded-md px-[10px] py-1" style={{ background: priority.bg, color: priority.color }}>

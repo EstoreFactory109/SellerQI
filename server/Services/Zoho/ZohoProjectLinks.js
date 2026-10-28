@@ -268,8 +268,10 @@ const getProjectOptions = async ({ clientId, search = '', refresh = false, redac
  * stored label can never drift from the real project, and a bogus id is
  * rejected instead of silently stored.
  */
-const linkProject = async ({ clientId, projectId, staffUserId }) => {
-    const client = await UserModel.findOne({ _id: clientId, isEsfClient: true }).select('_id');
+const linkProject = async ({ clientId, projectId, staffUserId, allowNonEsfClient = false }) => {
+    // Fix it buyers who are not ESF clients get a project too (FixItZohoService); the ESF
+    // portal never lists them, so the link only serves their Fix it work.
+    const client = await UserModel.findOne(allowNonEsfClient ? { _id: clientId } : { _id: clientId, isEsfClient: true }).select('_id');
     if (!client) {
         throw new ApiError(404, 'Client not found in the ESF portal');
     }

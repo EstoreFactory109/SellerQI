@@ -21,6 +21,10 @@ jest.mock('../../../Services/Zoho/ZohoAuth.js', () => ({
     getConnection: jest.fn(),
 }));
 jest.mock('../../../models/user-auth/userModel.js', () => ({ find: jest.fn(), findOne: jest.fn() }));
+// Fix it work orders: none, except in the "Fix it" block at the end, which sets mockFixIt.
+const mockFixIt = { orders: [], subtaskCount: 0 };
+jest.mock('../../../models/system/FixItWorkOrderModel.js', () => ({ find: () => ({ select: () => ({ lean: async () => mockFixIt.orders }) }) }));
+jest.mock('../../../models/system/FixItSubtaskModel.js', () => ({ countDocuments: async () => mockFixIt.subtaskCount }));
 jest.mock('../../../models/system/ZohoProjectTaskModel.js', () => ({
     find: jest.fn(),
     bulkWrite: jest.fn().mockResolvedValue({}),
@@ -478,5 +482,43 @@ describe('the Untapped tasklist stays off the Status board', () => {
 
         const board = await Sync.getTaskBoard('proj-1', { now: NOW });
         expect(board.inProgress).toHaveLength(0);
+    });
+});
+
+describe('Fix it work orders on the Status page', () => {
+    afterEach(() => { mockFixIt.orders = []; mockFixIt.subtaskCount = 0; });
+    const row = (over = {}) => ({ taskId: 't', name: 'Task', isCompleted: false, statusIsClosed: false, startDate: null, taskUpdatedAt: NOW, comments: [], ...over });
+
+    test('the seller\'s tasks are not rows of their own: the Fix it task carries them, with progress', async () => {
+        mockFixIt.orders = [{ _id: 'wo1', zohoParentTaskId: 'PARENT' }];
+        mockRows([
+            row({ taskId: 'PARENT', name: 'Fix it – Standard subscription (30 tasks a month)' }),
+            row({ taskId: 'S1', name: 'Selling at a loss — Blue Mug', parentTaskId: 'PARENT', depth: 1 }),
+            row({ taskId: 'S2', name: 'A+ missing — Red Mug', parentTaskId: 'PARENT', depth: 1, isCompleted: true }),
+            row({ taskId: 'OTHER', name: 'Other work' }),
+            row({ taskId: 'SUB_OF_OTHER', name: 'A normal subtask', parentTaskId: 'OTHER', depth: 1 }),
+        ]);
+        const board = await Sync.getTaskBoard('p1', { now: NOW });
+        const names = [...board.inProgress, ...board.completed].map((t) => t.taskId);
+        expect(names).not.toContain('S1');
+        expect(names).not.toContain('S2');
+        expect(names).toContain('SUB_OF_OTHER'); // only Fix it subtasks are folded
+        const parent = board.inProgress.find((t) => t.taskId === 'PARENT');
+        expect(parent.fixIt).toEqual({ done: 1, total: 2, subtasks: [
+            { id: 'S1', name: 'Selling at a loss — Blue Mug', done: false },
+            { id: 'S2', name: 'A+ missing — Red Mug', done: true },
+        ] });
+    });
+
+    test('the sync skips comment calls for Fix it subtasks and does not count them against the cap', async () => {
+        mockFixIt.orders = [{ _id: 'wo1', zohoParentTaskId: 'PARENT' }];
+        mockFixIt.subtaskCount = 45;
+        ZohoProjectsService.getProjectTaskUpdates.mockResolvedValue({ tasks: [] });
+        await Sync.syncProject({ projectId: 'p1', projectName: 'Acme', portalId: 'portal' });
+        const opts = ZohoProjectsService.getProjectTaskUpdates.mock.calls[0][1];
+        expect(opts.maxTasks).toBe(Sync.MAX_TASKS_PER_PROJECT + 45);
+        expect(opts.skipCommentsFor({ parentTaskId: 'PARENT' })).toBe(true);
+        expect(opts.skipCommentsFor({ parentTaskId: 'OTHER' })).toBe(false);
+        expect(opts.skipCommentsFor({ parentTaskId: null })).toBe(false);
     });
 });

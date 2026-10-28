@@ -27,7 +27,9 @@ const fail = (res, error, fallback) => {
 const createFixItCheckout = asyncHandler(async (req, res) => {
     try {
         const { packageId, openTasks, monthlyRecoverable, atStakeCurrency } = req.body || {};
-        const data = await FixItCheckoutService.createFixItCheckout(req.userId, { packageId, openTasks, monthlyRecoverable, atStakeCurrency });
+        const data = await FixItCheckoutService.createFixItCheckout(req.userId, {
+            packageId, openTasks, monthlyRecoverable, atStakeCurrency, country: req.country || null, region: req.region || null,
+        });
         return res.status(200).json(new ApiResponse(200, data, 'Checkout session created'));
     } catch (error) {
         return fail(res, error, 'Could not start checkout. Please try again.');

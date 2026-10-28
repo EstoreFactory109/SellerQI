@@ -43,6 +43,13 @@ const AI_REFRESH_MIN_HOURS_ON_CHANGE = 24;
 
 // Fields reconcile needs from stored tasks. Text and renderData are included because
 // they are compared, so a stale baked-in error/solution gets replaced.
+/** Fix it work orders mirror this marketplace's tasks into Zoho: sync them after a change. */
+const fixItSyncSoon = (userId, country, region) => {
+    if (!country || !region) return;
+    const FixItZohoSync = require('../Stripe/FixItZohoSync.js');
+    FixItZohoSync.syncInBackground(() => FixItZohoSync.syncForMarketplace(userId, country, region), `tasks ${userId} ${country}-${region}`);
+};
+
 const RECONCILE_FIELDS = '_id taskId identityKey asin errorCategory errorType status productName error solution renderData amount amountIsEstimated capitalAmount firstSeenAt lastSeenAt completedAt resolvedAt createdAt updatedAt';
 
 /**
@@ -417,6 +424,7 @@ class CreateTaskService {
                     await userTaskDocument.save();
                     
                     tasksRebuilt = true;
+                    fixItSyncSoon(userId, country, region);
                     logger.info(`Renewed tasks for user ${userId}. Inserted ${insertResult.insertedCount} fresh tasks.`);
                 } else {
                     logger.info(`Within renewal period for user ${userId}${scope}. Adding new unique tasks.`);
@@ -431,6 +439,7 @@ class CreateTaskService {
                     }
                     
                     logger.info(`Added ${insertResult.insertedCount} new unique tasks for user ${userId}`);
+                    if (insertResult.insertedCount > 0) fixItSyncSoon(userId, country, region);
                 }
             } else {
                 // Create new metadata document
@@ -524,6 +533,8 @@ class CreateTaskService {
             });
 
             const write = await TaskItem.reconcileWrite(ops);
+            // A Fix it buyer's tasks are mirrored as Zoho subtasks: pass the changes on.
+            if (summary.changed) fixItSyncSoon(userId, country, region);
 
             if (!meta) {
                 const renewalDate = new Date(now);
@@ -1261,6 +1272,19 @@ class CreateTaskService {
                 ...this.renderTaskIfNeeded(task),
                 ...getTaskPriorityMeta(task)
             })));
+            // Fix it buyers: which tasks the ESF team has (mirrored as Zoho subtasks), and
+            // which they finished. One query, only rows that have a mapping.
+            const fixIt = await require('../../models/system/FixItSubtaskModel.js')
+                .find({ userId, taskId: { $in: tasks.map((t) => t.taskId) }, state: { $in: ['open', 'closed'] } })
+                .select('taskId state closedBy').lean()
+                .catch(() => []);
+            if (fixIt.length) {
+                const byTask = new Map(fixIt.map((m) => [m.taskId, m]));
+                for (const t of tasks) {
+                    const m = byTask.get(t.taskId);
+                    if (m) t.fixIt = { state: m.state === 'open' ? 'with_team' : (m.closedBy === 'zoho' ? 'done_by_team' : 'closed') };
+                }
+            }
             const taskCounts = await TaskItem.countByStatus(userId, country, region);
 
             // The same issue-type groups the Dashboard's "Top things to fix" shows,
@@ -1344,9 +1368,10 @@ class CreateTaskService {
         try {
             // completedAt starts the grace period before a still-detected issue is
             // reopened (TaskReconcilePlanner); any seller action clears stillDetected.
+            // The seller's own decision: no longer "done by the ESF team".
             const update = status === 'completed'
-                ? { $set: { status, completedAt: new Date(), stillDetected: false } }
-                : { $set: { status, stillDetected: false }, $unset: { completedAt: '' } };
+                ? { $set: { status, completedAt: new Date(), stillDetected: false }, $unset: { completedBy: '' } }
+                : { $set: { status, stillDetected: false }, $unset: { completedAt: '', completedBy: '' } };
             const task = await TaskItem.findOneAndUpdate(
                 { userId, taskId },
                 update,
@@ -1356,6 +1381,10 @@ class CreateTaskService {
             if (!task) {
                 throw new Error('Task not found');
             }
+
+            // Mirrored as a Fix it subtask? Close / reopen it in Zoho now, not at the next sweep.
+            const FixItZohoSync = require('../Stripe/FixItZohoSync.js');
+            FixItZohoSync.syncInBackground(() => FixItZohoSync.syncForTask(userId, taskId), `task ${taskId} status`);
             
             return task;
         } catch (error) {

@@ -79,7 +79,7 @@ const finiteOrNull = (value) => (Number.isFinite(Number(value)) && value !== nul
 /**
  * @returns {Promise<{ url: string, sessionId: string }>}
  */
-const createFixItCheckout = async (userId, { packageId, openTasks, monthlyRecoverable, atStakeCurrency } = {}) => {
+const createFixItCheckout = async (userId, { packageId, openTasks, monthlyRecoverable, atStakeCurrency, country = null, region = null } = {}) => {
     const pkg = getFixItPackage(packageId);
     if (!pkg) throw new ApiError(400, 'Unknown Fix it package');
     if (!process.env.STRIPE_SECRET_KEY) throw new ApiError(503, 'Payments are not configured');
@@ -128,6 +128,8 @@ const createFixItCheckout = async (userId, { packageId, openTasks, monthlyRecove
         stripeCustomerId: customer.id,
         billing: pkg.billing,
         period: isMonthly(pkg) ? 1 : null,
+        country,
+        region,
         openTasks: finiteOrNull(openTasks),
         monthlyRecoverable: finiteOrNull(monthlyRecoverable),
         atStakeCurrency: typeof atStakeCurrency === 'string' ? atStakeCurrency.slice(0, 5) : null,

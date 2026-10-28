@@ -1,14 +1,17 @@
 /**
- * After an ESF client pays for a Fix it package, give the team the work as a Zoho task.
+ * After a seller pays for a Fix it package, give the team the work in Zoho: ONE parent task
+ * per engagement (FixItWorkOrder: the Trial, or a subscription for its whole life), with the
+ * seller's highest-value SellerQI tasks as its subtasks (FixItZohoSync). The project:
  *
- *   1. a project already linked to the account   → add the task there            ('linked')
+ *   1. a project already linked to the account   → use it                         ('linked')
  *   2. none linked, but their brand's project exists in Zoho (FixItProjectMatcher)
- *                                                 → link it, then add the task     ('matched')
- *   3. none at all                                → create a project named after the brand,
- *                                                   link it, then add the task     ('created')
+ *                                                 → link it                        ('matched')
+ *   3. none at all                                → create one named after the brand,
+ *                                                   and link it                    ('created')
  *
- * Sellers who are not ESF clients have no project and get none ('skipped'): the support
- * email is how the team hears about them.
+ * Every buyer gets this, ESF client or not (a non-ESF buyer's project is linked to their
+ * account but never appears in the ESF portal). A renewal raises the work order's quota;
+ * it never creates another parent task.
  *
  * This is the one place SellerQI creates a Zoho project; everywhere else projects are made
  * in Zoho and only linked here (ZohoProjectLinks).
@@ -23,6 +26,7 @@ const ZohoProjectsService = require('../Zoho/ZohoProjectsService.js');
 const ZohoProjectLinks = require('../Zoho/ZohoProjectLinks.js');
 const FixItProjectMatcher = require('../AI/FixItProjectMatcher.js');
 const { getFixItPackage } = require('./fixItPackages.js');
+const FixItWorkOrder = require('../../models/system/FixItWorkOrderModel.js');
 const logger = require('../../utils/Logger.js');
 
 const TASKLIST_NAME = 'Fix it packages';
@@ -77,7 +81,7 @@ const resolveProject = async (user, brand) => {
 
     const found = await findExistingProject(user, brand);
     if (found.project) {
-        const linked = await ZohoProjectLinks.linkProject({ clientId: user._id, projectId: found.project.id, staffUserId: null });
+        const linked = await ZohoProjectLinks.linkProject({ clientId: user._id, projectId: found.project.id, staffUserId: null, allowNonEsfClient: true });
         logger.info(`[FixItZoho] linked existing project ${found.project.id} ("${found.project.name}") to ${user._id} (${found.matchedBy}${found.reason ? `: ${found.reason}` : ''})`);
         return { projectId: linked.projectId, projectName: linked.projectName, portalId: linked.portalId, source: 'matched' };
     }
@@ -90,7 +94,7 @@ const resolveProject = async (user, brand) => {
         description: `Created by SellerQI for ${fullName(user) || user.email} (${user.email}) after a Fix it package purchase.`,
     });
     await ZohoProjectLinks.invalidateProjectCache();
-    const linked = await ZohoProjectLinks.linkProject({ clientId: user._id, projectId: created.id, staffUserId: null });
+    const linked = await ZohoProjectLinks.linkProject({ clientId: user._id, projectId: created.id, staffUserId: null, allowNonEsfClient: true });
     logger.info(`[FixItZoho] created project ${created.id} ("${created.name}") for ${user._id}`);
     return { projectId: linked.projectId, projectName: linked.projectName || created.name, portalId: linked.portalId, source: 'created' };
 };
@@ -115,78 +119,139 @@ const taskDescription = (purchase, user, brand) => {
     const lines = [
         `${fullName(user) || user.email} bought the Fix it ${purchase.packageName} package through SellerQI on ${new Date(purchase.paidAt || Date.now()).toUTCString()}.`,
         '',
-        `Package: ${purchase.packageName} — fix ${purchase.tasks} of their SellerQI tasks (${PACE[purchase.packageId] || 'as agreed'}).`,
-        ...(purchase.billing === 'monthly'
-            ? [`Monthly subscription, month ${purchase.period || 1}: ${purchase.tasks} tasks for this month${purchase.periodEnd ? `, paid up to ${new Date(purchase.periodEnd).toUTCString().slice(0, 16)}` : ''}. A new task is added each month it renews.`]
-            : []),
-        `Paid: ${money(purchase.amount, purchase.currency)}${pkg && purchase.amount !== pkg.priceUsd ? ` (list price $${pkg.priceUsd})` : ''}.`,
-    ];
-    if (typeof purchase.openTasks === 'number') {
-        const stake = typeof purchase.monthlyRecoverable === 'number'
-            ? `, worth ~${purchase.atStakeCurrency || '$'}${Math.round(purchase.monthlyRecoverable).toLocaleString('en-US')}/mo`
-            : '';
-        lines.push(`They had ${purchase.openTasks} open tasks in SellerQI${stake}. Start with the highest-value ones (SellerQI → Tasks → High impact).`);
-    }
-    lines.push(
+        `Package: ${purchase.packageName} — fix ${purchase.tasks} of their SellerQI tasks${purchase.billing === 'monthly' ? ' every month' : ''} (${PACE[purchase.packageId] || 'as agreed'}).`,
+        `Paid: ${money(purchase.amount, purchase.currency)}${purchase.billing === 'monthly' ? '/month' : ''}${pkg && purchase.amount !== pkg.priceUsd ? ` (list price $${pkg.priceUsd})` : ''}.`,
+        '',
+        'The tasks to fix are the subtasks below — the seller\'s highest-value SellerQI tasks, added by SellerQI and kept in step with it.',
         '',
         `Brand: ${brand}`,
         `Contact: ${user.email}${user.phone && !user.needsPhoneUpdate ? ` · ${user.phone}` : ''}`,
-        `Stripe payment: ${purchase.stripePaymentIntentId || 'n/a'}`,
-        '',
-        'Added automatically by SellerQI.',
-    );
+    ];
     return lines.join('\n');
 };
 
+/** One work order per engagement: the Trial purchase, or the subscription for its whole life. */
+const workOrderKey = (purchase) => (purchase.billing === 'monthly' && purchase.stripeSubscriptionId
+    ? purchase.stripeSubscriptionId
+    : `purchase:${purchase._id}`);
+
+const parentTaskName = (purchase) => (purchase.billing === 'monthly'
+    ? `Fix it – ${purchase.packageName} subscription (${purchase.tasks} tasks a month)`
+    : `Fix it – ${purchase.packageName} (${purchase.tasks} tasks)`);
+
+/** Their marketplace: the one they bought from, else their first connected one. */
+const marketplaceOf = async (purchase, userId) => {
+    if (purchase.country && purchase.region) return { country: purchase.country, region: purchase.region };
+    const seller = await SellerCentralModel.findOne({ User: userId }).select('sellerAccount.country sellerAccount.region').lean();
+    const account = (seller?.sellerAccount || []).find((a) => a?.country && a?.region);
+    return { country: account?.country || null, region: account?.region || null };
+};
+
+const resultOf = (wo, sync) => ({
+    status: 'done',
+    projectId: wo.zohoProjectId,
+    projectName: wo.zohoProjectName,
+    projectSource: wo.zohoProjectSource,
+    taskId: wo.zohoParentTaskId,
+    // What support reads in the email: the parent, and how many of the seller's tasks are under it.
+    taskName: sync && typeof sync.total === 'number'
+        ? `${wo.zohoParentTaskName} — ${sync.total} subtask${sync.total === 1 ? '' : 's'}${sync.done ? `, ${sync.done} done` : ''}`
+        : wo.zohoParentTaskName,
+});
+
 /**
+ * After a paid period: the engagement's work order (created on its first payment, its quota
+ * raised on each renewal), then a sync that tops its subtasks up. Every buyer gets one —
+ * ESF clients and others alike.
  * @param {object} purchase  a FixItPurchase (plain object)
- * @returns {Promise<{ status: 'done'|'skipped'|'failed', projectId?, projectName?, projectSource?, taskId?, taskName?, error? }>}
+ * @returns {Promise<{ status: 'done'|'failed', projectId?, projectName?, projectSource?, taskId?, taskName?, subtasks?, error? }>}
  */
 const addFixItTaskToZoho = async (purchase) => {
-    // Kept outside the try: a project created or linked before the task failed is still
-    // worth telling the team about.
     let project = null;
+    const FixItZohoSync = require('./FixItZohoSync.js');
     try {
+        // Already done for this period (a retry after the email failed, say).
         if (purchase.zohoTaskId) {
             return { status: 'done', projectId: purchase.zohoProjectId, projectName: purchase.zohoProjectName, projectSource: purchase.zohoProjectSource, taskId: purchase.zohoTaskId, taskName: purchase.zohoTaskName };
         }
+        const key = workOrderKey(purchase);
+        let wo = await FixItWorkOrder.findOne({ key }).lean();
+
+        if (wo?.zohoParentTaskId) {
+            // A renewal: more tasks paid for, same parent task. Raised once per period.
+            const period = Number(purchase.period) || 1;
+            if (purchase.billing === 'monthly' && period > (wo.monthsPaid || 1)) {
+                await FixItWorkOrder.updateOne(
+                    { _id: wo._id, monthsPaid: { $lt: period } },
+                    { $set: { monthsPaid: period, status: 'active', endedAt: null }, $inc: { quota: Number(purchase.tasks) || 0 } }
+                );
+            }
+            const sync = await FixItZohoSync.syncWorkOrderById(wo._id);
+            wo = await FixItWorkOrder.findById(wo._id).lean();
+            // Same project and parent as month 1: never reported as a new project again.
+            return { ...resultOf(wo, sync), projectSource: 'linked' };
+        }
+
         const user = await UserModel.findById(purchase.userId)
             .select('firstName lastName email phone needsPhoneUpdate isEsfClient zohoProject').lean();
         if (!user) return { status: 'failed', error: 'Buyer account not found' };
-        if (!user.isEsfClient) return { status: 'skipped' };
-
         const connection = await ZohoAuth.getConnection();
         if (!connection?.portalId) return { status: 'failed', error: 'Zoho Projects is not connected' };
 
         const seller = await SellerCentralModel.findOne({ User: user._id }).select('brand').lean();
         const brand = String(seller?.brand || '').trim() || fullName(user) || user.email;
-
         project = await resolveProject(user, brand);
-        const tasklistId = await fixItTasklist(project.projectId, project.portalId);
-        const taskName = purchase.billing === 'monthly'
-            ? `Fix it – ${purchase.packageName} subscription, month ${purchase.period || 1}: fix ${purchase.tasks} tasks (paid ${money(purchase.amount, purchase.currency)})`
-            : `Fix it – ${purchase.packageName} package: fix ${purchase.tasks} tasks (paid ${money(purchase.amount, purchase.currency)})`;
-        const due = new Date(Date.now() + (DAYS_TO_FINISH[purchase.packageId] || 30) * 86400000);
-        const task = await ZohoProjectsService.createTask({
-            projectId: project.projectId,
-            portalId: project.portalId,
-            name: taskName,
-            description: taskDescription(purchase, user, brand),
-            tasklistId,
-            endDate: isoDay(due),
-        });
+        const { country, region } = await marketplaceOf(purchase, user._id);
+        const name = parentTaskName(purchase);
+
+        // Claim the work order before creating anything in Zoho, so a retry never makes a second parent.
+        wo = await FixItWorkOrder.findOneAndUpdate(
+            { key },
+            { $setOnInsert: {
+                userId: user._id, country, region, key,
+                kind: purchase.billing === 'monthly' ? 'subscription' : 'trial',
+                packageId: purchase.packageId, packageName: purchase.packageName,
+                tasksPerPeriod: purchase.tasks, quota: purchase.tasks, monthsPaid: Number(purchase.period) || 1,
+                portalId: project.portalId || String(connection.portalId),
+                zohoProjectId: project.projectId, zohoProjectName: project.projectName, zohoProjectSource: project.source,
+                zohoParentTaskName: name,
+            } },
+            { upsert: true, new: true }
+        ).lean();
+
+        if (!wo.zohoParentTaskId) {
+            // A crash after creating the parent but before saving it: adopt that parent
+            // (a top-level task with exactly this name) rather than make a second one.
+            const existing = await ZohoProjectsService.listProjectTasks({ projectId: wo.zohoProjectId, portalId: wo.portalId }).catch(() => []);
+            let parent = existing.find((t) => !t.parentTaskId && t.name === name) || null;
+            if (!parent) {
+                const tasklistId = await fixItTasklist(project.projectId, project.portalId);
+                parent = await ZohoProjectsService.createTask({
+                    projectId: project.projectId,
+                    portalId: project.portalId,
+                    name,
+                    description: taskDescription(purchase, user, brand),
+                    tasklistId,
+                    ...(purchase.billing === 'monthly' ? {} : { endDate: isoDay(new Date(Date.now() + (DAYS_TO_FINISH[purchase.packageId] || 30) * 86400000)) }),
+                });
+            }
+            await FixItWorkOrder.updateOne({ _id: wo._id }, { $set: { zohoParentTaskId: String(parent.id), zohoOpenStatusId: parent.statusId || null } });
+            logger.info(`[FixItZoho] work order ${wo._id}: parent task ${parent.id} in project ${project.projectId} (${project.source})`);
+        }
+
+        const sync = await FixItZohoSync.syncWorkOrderById(wo._id);
+        wo = await FixItWorkOrder.findById(wo._id).lean();
 
         // The client's Status page reads Mongo: pull the new task in now, not at the nightly run.
         try {
             const ZohoTaskSync = require('../Zoho/ZohoTaskSync.js');
             Promise.resolve(ZohoTaskSync.syncProject({ projectId: project.projectId, projectName: project.projectName, portalId: project.portalId }))
-                .catch((error) => logger.warn(`[FixItZoho] task ${task.id} created; follow-up sync failed (nightly run will catch up): ${error.message}`));
+                .catch((error) => logger.warn(`[FixItZoho] follow-up project sync failed (nightly run will catch up): ${error.message}`));
         } catch (_) { /* sync is a nicety */ }
 
-        logger.info(`[FixItZoho] purchase ${purchase._id}: task ${task.id} in project ${project.projectId} (${project.source})`);
-        return { status: 'done', projectId: project.projectId, projectName: project.projectName, projectSource: project.source, taskId: String(task.id), taskName };
+        return resultOf(wo, sync);
     } catch (error) {
-        logger.error(`[FixItZoho] purchase ${purchase._id}: Zoho task not created: ${error.message}`);
+        logger.error(`[FixItZoho] purchase ${purchase._id}: Zoho work not set up: ${error.message}`);
         return {
             status: 'failed',
             error: String(error.message || 'Unknown error').slice(0, 300),
@@ -195,4 +260,18 @@ const addFixItTaskToZoho = async (purchase) => {
     }
 };
 
-module.exports = { addFixItTaskToZoho, findExistingProject, TASKLIST_NAME };
+/**
+ * The subscription changed in Stripe: cancelled (no more top-ups), resumed, or ended.
+ * @param {object} sub  a FixItSubscription (plain)
+ */
+const onSubscriptionChanged = async (sub) => {
+    if (!sub?.stripeSubscriptionId) return;
+    const ended = sub.status === 'canceled';
+    const status = ended ? 'ended' : sub.cancelAtPeriodEnd ? 'ending' : 'active';
+    await FixItWorkOrder.updateOne(
+        { key: sub.stripeSubscriptionId, status: { $ne: status } },
+        { $set: { status, endedAt: ended ? (sub.endedAt || new Date()) : null } }
+    );
+};
+
+module.exports = { addFixItTaskToZoho, onSubscriptionChanged, findExistingProject, workOrderKey, TASKLIST_NAME };

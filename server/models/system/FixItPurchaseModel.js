@@ -23,6 +23,9 @@ const fixItPurchaseSchema = new mongoose.Schema(
         stripeSessionId: { type: String, required: true, unique: true },
         // Subscription packages: which subscription, which invoice, which month (1 = first).
         billing: { type: String, enum: ['one_time', 'monthly'], default: 'one_time' },
+        // The marketplace the seller bought from: whose tasks the team works on.
+        country: { type: String, default: null },
+        region: { type: String, default: null },
         stripeSubscriptionId: { type: String, default: null, index: true },
         stripeInvoiceId: { type: String, default: null },
         period: { type: Number, default: null },

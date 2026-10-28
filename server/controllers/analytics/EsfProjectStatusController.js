@@ -93,6 +93,8 @@ const toClientTask = (task, { staffView = false } = {}) => {
         endDate: task.endDate,
         updatedAt: task.taskUpdatedAt,
         hasAttachments: task.hasAttachments,
+        // Fix it parent: the seller's tasks under it and how many are done.
+        ...(task.fixIt ? { fixIt: task.fixIt } : {}),
         // The full, dated, multi-line history — for the Status page's detail
         // panel, which renders it with white-space: pre-line.
         summary: task.commentSummary?.text || null,

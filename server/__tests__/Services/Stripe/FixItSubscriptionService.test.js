@@ -42,6 +42,8 @@ jest.mock('../../../Services/Stripe/StripeService.js', () => ({
   getSubscriptionPeriod: (sub) => ({ start: null, end: sub.items?.data?.[0]?.current_period_end ?? null }),
 }));
 jest.mock('../../../Services/Stripe/FixItCheckoutService.js', () => ({ runInBackground: jest.fn(), frontendBase: () => 'https://members.sellerqi.com' }));
+const mockOnSubscriptionChanged = jest.fn(async () => {});
+jest.mock('../../../Services/Stripe/FixItZohoService.js', () => ({ onSubscriptionChanged: (...a) => mockOnSubscriptionChanged(...a) }));
 
 const StripeService = require('../../../Services/Stripe/StripeService.js');
 const { sendFixItCancellationEmail } = require('../../../Services/Email/SendFixItPurchaseEmail.js');
@@ -134,5 +136,14 @@ describe('what the seller does', () => {
     expect(StripeService.stripe.billingPortal.sessions.create).toHaveBeenCalledWith({ customer: 'cus_1', return_url: 'https://members.sellerqi.com/seller-central-checker/tasks' });
     StripeService.stripe.billingPortal.sessions.create.mockRejectedValueOnce(new Error('No configuration provided'));
     await expect(svc.portalUrl('u1')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});
+
+describe('the Zoho work order follows the subscription', () => {
+  it('is told about every change (cancel, resume, end)', async () => {
+    await svc.upsertFromStripe(sub({ cancel_at_period_end: true }));
+    expect(mockOnSubscriptionChanged).toHaveBeenLastCalledWith(expect.objectContaining({ stripeSubscriptionId: 'sub_1', cancelAtPeriodEnd: true }));
+    await svc.upsertFromStripe(sub({ status: 'canceled', ended_at: NOV_27 }));
+    expect(mockOnSubscriptionChanged).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'canceled' }));
   });
 });

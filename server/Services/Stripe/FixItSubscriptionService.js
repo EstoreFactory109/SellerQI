@@ -97,6 +97,10 @@ const upsertFromStripe = async (sub) => {
         { upsert: true, new: true }
     ).lean();
     if (cancelling) await notifyCancellationOnce(doc);
+    // Cancelled: no new subtasks after this month; ended: the work order winds down.
+    await Promise.resolve()
+        .then(() => require('./FixItZohoService.js').onSubscriptionChanged(doc))
+        .catch((error) => logger.warn(`[FixItSubscription] work order not updated for ${sub.id}: ${error.message}`));
     return doc;
 };
 

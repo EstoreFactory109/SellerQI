@@ -110,6 +110,8 @@ const TaskItemSchema = new mongoose.Schema({
     reopenCount: { type: Number, default: 0 },
     // Reopened because the seller marked it done but the data still shows it.
     stillDetected: { type: Boolean, default: false },
+    // Who marked it completed when not the seller: 'esf_team' (closed in Zoho, Fix it).
+    completedBy: { type: String },
     // Why it was last reopened: 'reappeared' | 'still_detected' | 'escalated' (got worse).
     reopenReason: { type: String },
     // Which problem this is (Services/Calculations/TaskIdentity.js). Stays the same while

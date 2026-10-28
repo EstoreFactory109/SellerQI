@@ -435,7 +435,9 @@ export default function Tasks() {
         proposedAction: task.proposedAction || null,
         // Task-specific details some actions need (e.g. the seller IDs on a
         // new_seller_on_brand task).
-        renderData: task.renderData || null
+        renderData: task.renderData || null,
+        // Fix it: the ESF team has this task (a Zoho subtask), or finished it there.
+        fixIt: task.fixIt || null
       };
     });
   }, [tasks, productDetailsMap]);
@@ -1194,6 +1196,24 @@ export default function Tasks() {
                         {formatEffort(item.effortMinutes) && (
                           <span className="text-[11px] whitespace-nowrap" style={{ color: COLORS.textMuted }}>
                             {formatEffort(item.effortMinutes)}
+                          </span>
+                        )}
+                        {item.fixIt?.state === 'with_team' && !completedTasks.has(item.taskId) && (
+                          <span
+                            className="inline-block text-[11px] font-semibold px-2 py-1 rounded-full whitespace-nowrap"
+                            title="Part of your Fix it package: the eStore Factory team is working on this."
+                            style={{ background: 'rgba(59,130,246,.14)', color: COLORS.accent }}
+                          >
+                            ESF team is on it
+                          </span>
+                        )}
+                        {item.fixIt?.state === 'done_by_team' && completedTasks.has(item.taskId) && (
+                          <span
+                            className="inline-block text-[11px] font-semibold px-2 py-1 rounded-full whitespace-nowrap"
+                            title="Fixed by the eStore Factory team as part of your Fix it package."
+                            style={{ background: 'rgba(34,197,94,.14)', color: COLORS.good }}
+                          >
+                            Done by ESF team
                           </span>
                         )}
                         <span

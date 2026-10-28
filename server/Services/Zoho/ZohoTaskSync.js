@@ -93,10 +93,32 @@ const linkedProjects = async () => {
  * Returns a summary rather than throwing on partial failure, so the caller can
  * log per-project outcomes and keep going.
  */
+/** The Fix it parent tasks in this project, and how many subtasks they hold. */
+const fixItParentsOf = async (projectId) => {
+    try {
+        const FixItWorkOrder = require('../../models/system/FixItWorkOrderModel.js');
+        const FixItSubtask = require('../../models/system/FixItSubtaskModel.js');
+        const orders = await FixItWorkOrder.find({ zohoProjectId: String(projectId), zohoParentTaskId: { $ne: null } })
+            .select('_id zohoParentTaskId').lean();
+        if (!orders.length) return { ids: new Set(), subtaskCount: 0 };
+        const subtaskCount = await FixItSubtask.countDocuments({ workOrderId: { $in: orders.map((o) => o._id) }, state: { $in: ['creating', 'open', 'closed'] } });
+        return { ids: new Set(orders.map((o) => String(o.zohoParentTaskId))), subtaskCount };
+    } catch (error) {
+        logger.warn(`[ZohoTaskSync] could not read Fix it work orders for ${projectId}: ${error.message}`);
+        return { ids: new Set(), subtaskCount: 0 };
+    }
+};
+
 const syncProject = async ({ projectId, projectName, portalId }) => {
+    // Fix it work orders put the seller's SellerQI tasks under one parent as subtasks. Those
+    // are stored (the Status page shows the parent's progress from them) but skip the
+    // per-task comment calls and AI work, and do not eat into the per-project cap.
+    const fixItParents = await fixItParentsOf(projectId);
+    const isFixItSubtask = (t) => Boolean(t.parentTaskId && fixItParents.ids.has(String(t.parentTaskId)));
     const updates = await ZohoProjectsService.getProjectTaskUpdates(projectId, {
         includeComments: true,
-        maxTasks: MAX_TASKS_PER_PROJECT,
+        maxTasks: MAX_TASKS_PER_PROJECT + fixItParents.subtaskCount,
+        skipCommentsFor: isFixItSubtask,
     });
 
     const tasks = updates.tasks || [];
@@ -117,6 +139,7 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
     // project firing them all at once would hit rate limits rather than finish
     // faster.
     const summaries = await mapWithConcurrency(tasks, SUMMARY_CONCURRENCY, async (task) => {
+        if (isFixItSubtask(task)) return null;
         const prior = priorByTask.get(task.id) || {};
         return ZohoTaskSummaryService.summariseTask(task, {
             previousHash: prior.sourceHash,
@@ -135,6 +158,7 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
     if (DELIVERABLES_ENABLED) {
         const priorDecisions = new Map(existing.map((row) => [row.taskId, row.deliverableDecisions || []]));
         const decided = await mapWithConcurrency(tasks, SUMMARY_CONCURRENCY, async (task) => {
+            if (isFixItSubtask(task)) return null;
             const candidates = candidatesForTask({
                 comments: (task.comments || []).map((c) => ({ ...c, commentId: c.id })),
             });
@@ -161,6 +185,9 @@ const syncProject = async ({ projectId, projectName, portalId }) => {
                             projectName: projectName || null,
                             taskId: task.id,
                             name: task.name,
+                            // The subtask tree: the Status page folds Fix it subtasks into their parent.
+                            parentTaskId: task.parentTaskId || null,
+                            depth: task.depth || 0,
                             status: task.status,
                             statusIsClosed: task.statusIsClosed,
                             isCompleted: task.isCompleted,
@@ -595,7 +622,30 @@ const getTaskBoard = async (projectId, { now = new Date(), completedSinceDays = 
     const board = { inProgress: [], comingUp: [], completed: [] };
     const completedCutoff = new Date(now.getTime() - completedSinceDays * 86400000);
 
+    // Fix it: the seller's SellerQI tasks are subtasks of one parent. They are not rows of
+    // their own here; the parent carries them, with its progress ("12 of 30 done").
+    const { ids: fixItParentIds } = await fixItParentsOf(projectId);
+    const fixItChildren = new Map();
     for (const row of rows) {
+        if (row.parentTaskId && fixItParentIds.has(String(row.parentTaskId))) {
+            if (!fixItChildren.has(row.parentTaskId)) fixItChildren.set(row.parentTaskId, []);
+            fixItChildren.get(row.parentTaskId).push(row);
+        }
+    }
+
+    for (const row of rows) {
+        if (row.parentTaskId && fixItParentIds.has(String(row.parentTaskId))) continue;
+        if (fixItParentIds.has(String(row.taskId))) {
+            const children = fixItChildren.get(row.taskId) || [];
+            row.fixIt = {
+                done: children.filter((c) => c.isCompleted || c.statusIsClosed).length,
+                total: children.length,
+                subtasks: children
+                    .map((c) => ({ id: c.taskId, name: c.name, done: Boolean(c.isCompleted || c.statusIsClosed) }))
+                    .sort((a, b) => Number(a.done) - Number(b.done)),
+            };
+        }
+
         /**
          * The Untapped tasklist is not work, and must not appear here.
          *

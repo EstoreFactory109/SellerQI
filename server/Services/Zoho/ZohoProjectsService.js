@@ -167,6 +167,9 @@ const normaliseTask = (task = {}) => ({
     // their own status names (this one uses Open/Content/Design), so the boolean
     // is the only portable signal — never match on the name.
     statusIsClosed: Boolean(task.status && task.status.is_closed_type),
+    // The status's id: the only way to SET a status on v3 (a name is refused). Read off a
+    // live task rather than hard-coded, since layouts can differ per project.
+    statusId: (task.status && asId(task.status.id, task.status.id_string)) || null,
     isCompleted: Boolean(task.is_completed),
     priority: task.priority || null,
     percentComplete: task.completion_percentage !== undefined
@@ -365,7 +368,7 @@ const createProject = async ({ name, description, startDate, endDate, ownerId })
  * documented-path drift between API generations, should not fail the whole call — the
  * tasks and comments are the part the caller actually asked for.
  */
-const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTasks = MAX_TASKS_DEFAULT } = {}) => {
+const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTasks = MAX_TASKS_DEFAULT, skipCommentsFor = null } = {}) => {
     if (!projectId) {
         const error = new ApiError(400, 'Project ID is required');
         logger.error(error);
@@ -393,7 +396,9 @@ const getProjectTaskUpdates = async (projectId, { includeComments = true, maxTas
         // and by the concurrency limit here so a large project cannot saturate the
         // connection pool or trip Zoho's rate limiter.
         const commentSets = await mapWithConcurrency(tasks, COMMENT_FETCH_CONCURRENCY, async (task) => {
-            if (!task.id) {
+            // e.g. Fix it subtasks: SellerQI already knows their content; a comment call each
+            // would make every sync cost as many calls as the seller has mirrored tasks.
+            if (!task.id || (skipCommentsFor && skipCommentsFor(task))) {
                 return [];
             }
             try {
@@ -893,7 +898,105 @@ const downloadDeliverableFile = async (file, { preview = false } = {}) => {
     throw lastError || new ApiError(404, 'This file is no longer available in Zoho');
 };
 
+/*
+ * ── Subtasks and task updates (Fix it work orders: FixItZohoSync) ──
+ *
+ * Every shape below was probed live on 2026-10-28 (scripts/probeZohoSubtasks.js), because
+ * the obvious ones do not work on this portal:
+ *   create  v3 POST …/tasks with parental_info.parent_task_id   (v3 …/tasks/{id}/subtasks: URL_RULE_NOT_CONFIGURED)
+ *   list    the v3 flat task list, filtered on parental_info    (same error for v3 …/subtasks)
+ *   update  v3 PATCH …/tasks/{id} { name, description }
+ *   close   v2 POST …/tasks/{id}/ percent_complete=100          (no status id needed)
+ *   reopen  v3 PATCH …/tasks/{id} { status: { id: <an open status> } }
+ *           (v2 percent_complete=0 answers 403 CANNOT_OPEN_TASK; v3 refuses a status by name)
+ */
+const taskPath = (portalId, projectId, taskId) => `${PATHS.tasks.path(portalId, projectId)}/${taskId}`;
+
+/** Create a subtask under `parentTaskId`. Returns the normalised task (string id). */
+const createSubtask = async ({ projectId, parentTaskId, name, description, portalId }) => {
+    if (!projectId || !parentTaskId) throw new ApiError(400, 'A project and a parent task are required to create a subtask');
+    const title = typeof name === 'string' ? name.trim() : '';
+    if (!title) throw new ApiError(400, 'Subtask name is required');
+    const resolvedPortal = await resolvePortalId(portalId);
+    const body = { name: title, parental_info: { parent_task_id: String(parentTaskId) } };
+    if (description) body.description = String(description);
+    const response = await zohoRequest({
+        method: 'POST',
+        path: PATHS.tasks.path(resolvedPortal, projectId),
+        version: 'v3',
+        data: body,
+        context: `Creating a subtask of ${parentTaskId} in project ${projectId}`,
+    });
+    const task = normaliseTask(unwrap(response, PATHS.tasks.envelope)[0] || response);
+    if (!task.id) throw new ApiError(502, 'Zoho accepted the subtask but returned no id');
+    if (task.parentTaskId && task.parentTaskId !== String(parentTaskId)) {
+        logger.warn(`[ZohoProjects] subtask ${task.id} reports parent ${task.parentTaskId}, expected ${parentTaskId}`);
+    }
+    return task;
+};
+
+/** Every task of a project, subtasks included (v3 flat list, string ids). */
+const listProjectTasks = async ({ projectId, portalId }) => {
+    const resolvedPortal = await resolvePortalId(portalId);
+    const raw = await paginate({
+        path: PATHS.tasks.path(resolvedPortal, projectId),
+        version: PATHS.tasks.version,
+        envelope: PATHS.tasks.envelope,
+        pageSize: PAGE_SIZE.tasks,
+        maxItems: 5000,
+        context: `Listing tasks of project ${projectId}`,
+    });
+    return raw.map(normaliseTask);
+};
+
+/** The subtasks of one task. */
+const listSubtasks = async ({ projectId, parentTaskId, portalId }) =>
+    (await listProjectTasks({ projectId, portalId })).filter((t) => t.parentTaskId === String(parentTaskId));
+
+/** Rename / redescribe a task, and/or set its status by id. Only the fields given are sent. */
+const updateTask = async ({ projectId, taskId, name, description, statusId, portalId }) => {
+    const resolvedPortal = await resolvePortalId(portalId);
+    const body = {};
+    if (typeof name === 'string' && name.trim()) body.name = name.trim();
+    if (typeof description === 'string') body.description = description;
+    if (statusId) body.status = { id: String(statusId) };
+    if (Object.keys(body).length === 0) return null;
+    const response = await zohoRequest({
+        method: 'PATCH',
+        path: taskPath(resolvedPortal, projectId, taskId),
+        version: 'v3',
+        data: body,
+        context: `Updating Zoho task ${taskId} in project ${projectId}`,
+    });
+    return normaliseTask(unwrap(response, PATHS.tasks.envelope)[0] || response);
+};
+
+/** Close a task (100% complete puts it in the portal's closed status; no status id needed). */
+const closeTask = async ({ projectId, taskId, portalId }) => {
+    const resolvedPortal = await resolvePortalId(portalId);
+    await zohoRequest({
+        method: 'POST',
+        path: `${taskPath(resolvedPortal, projectId, taskId)}/`,
+        version: 'v2',
+        data: { percent_complete: '100' },
+        form: true,
+        context: `Closing Zoho task ${taskId} in project ${projectId}`,
+    });
+};
+
+/** Reopen a closed task: v3 PATCH to an open status id (read off an open task of the project). */
+const reopenTask = async ({ projectId, taskId, openStatusId, portalId }) => {
+    if (!openStatusId) throw new ApiError(400, 'An open status id is required to reopen a Zoho task');
+    return updateTask({ projectId, taskId, statusId: openStatusId, portalId });
+};
+
 module.exports = {
+    createSubtask,
+    listProjectTasks,
+    listSubtasks,
+    updateTask,
+    closeTask,
+    reopenTask,
     normaliseComment,
     canDownloadFiles,
     downloadDeliverableFile,

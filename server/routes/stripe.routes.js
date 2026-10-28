@@ -29,6 +29,7 @@ const {
 
 // Import middleware
 const auth = require('../middlewares/Auth/auth');
+const { getLocationOptional } = require('../middlewares/Auth/getLocation.js');
 const { validateCheckoutSession } = require('../middlewares/validator/paymentValidate.js');
 
 // Webhook routes (no auth required, Stripe handles verification via signature)
@@ -52,7 +53,8 @@ router.get('/payment-history', auth, getPaymentHistory);
 router.get('/invoice-download', auth, getInvoiceDownloadUrl);
 
 // "Fix it" packages (Tasks page): one-time payments, separate from the subscription above.
-router.post('/fix-it/checkout', auth, createFixItCheckout);
+// The marketplace the seller is looking at is whose tasks the team works on.
+router.post('/fix-it/checkout', auth, getLocationOptional, createFixItCheckout);
 router.get('/fix-it/confirm', auth, confirmFixItPurchase);
 router.get('/fix-it/subscription', auth, getFixItSubscription);
 router.post('/fix-it/subscription/cancel', auth, cancelFixItSubscription);

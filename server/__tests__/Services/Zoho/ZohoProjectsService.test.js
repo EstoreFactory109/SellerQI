@@ -825,3 +825,46 @@ describe('createTasklist', () => {
         expect(axios).not.toHaveBeenCalled();
     });
 });
+
+describe('subtasks and task updates — the shapes probed live on 2026-10-28', () => {
+    const okTask = (over = {}) => ({ id: 'S1', name: 'Sub', parental_info: { parent_task_id: 'P1' }, status: { id: 'ST_OPEN', name: 'Open', is_closed_type: false }, ...over });
+    beforeEach(() => {
+        axios.mockReset();
+        ZohoAuth.getAccessToken.mockResolvedValue('access-token-1');
+        ZohoAuth.getConnection.mockResolvedValue({ apiDomain: 'https://projectsapi.zoho.com', portalId: 'portal-1' });
+    });
+    const call = (i = 0) => axios.mock.calls[i][0];
+
+    test('createSubtask: v3 POST to the task list with parental_info (the /subtasks path is not configured)', async () => {
+        axios.mockResolvedValueOnce({ data: okTask() });
+        const sub = await ZohoProjectsService.createSubtask({ projectId: 'p1', parentTaskId: 'P1', name: ' Fix price ', description: 'why' });
+        expect(call().method).toBe('POST');
+        expect(call().url).toBe('https://projectsapi.zoho.com/api/v3/portal/portal-1/projects/p1/tasks');
+        expect(call().data).toEqual({ name: 'Fix price', description: 'why', parental_info: { parent_task_id: 'P1' } });
+        expect(sub).toMatchObject({ id: 'S1', parentTaskId: 'P1', statusId: 'ST_OPEN', statusIsClosed: false });
+    });
+
+    test('listSubtasks: the flat v3 list filtered to the parent', async () => {
+        axios.mockResolvedValueOnce({ data: { tasks: [okTask(), okTask({ id: 'S2', parental_info: { parent_task_id: 'OTHER' } }), okTask({ id: 'TOP', parental_info: undefined })] } });
+        const subs = await ZohoProjectsService.listSubtasks({ projectId: 'p1', parentTaskId: 'P1' });
+        expect(subs.map((s) => s.id)).toEqual(['S1']);
+    });
+
+    test('updateTask: v3 PATCH with only the fields given; status by id', async () => {
+        axios.mockResolvedValueOnce({ data: okTask() });
+        await ZohoProjectsService.updateTask({ projectId: 'p1', taskId: 'S1', name: 'New', statusId: 'ST_OPEN' });
+        expect(call().method).toBe('PATCH');
+        expect(call().url).toBe('https://projectsapi.zoho.com/api/v3/portal/portal-1/projects/p1/tasks/S1');
+        expect(call().data).toEqual({ name: 'New', status: { id: 'ST_OPEN' } });
+    });
+
+    test('closeTask: v2 percent_complete=100, form-encoded; reopenTask: v3 PATCH to an open status id', async () => {
+        axios.mockResolvedValue({ data: { tasks: [] } });
+        await ZohoProjectsService.closeTask({ projectId: 'p1', taskId: 'S1' });
+        expect(call().url).toBe('https://projectsapi.zoho.com/restapi/portal/portal-1/projects/p1/tasks/S1/');
+        expect(String(call().data)).toBe('percent_complete=100');
+        await ZohoProjectsService.reopenTask({ projectId: 'p1', taskId: 'S1', openStatusId: 'ST_OPEN' });
+        expect(call(1)).toMatchObject({ method: 'PATCH', data: { status: { id: 'ST_OPEN' } } });
+        await expect(ZohoProjectsService.reopenTask({ projectId: 'p1', taskId: 'S1' })).rejects.toMatchObject({ statusCode: 400 });
+    });
+});

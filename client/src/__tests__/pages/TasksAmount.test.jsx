@@ -514,3 +514,15 @@ describe('Tasks page - Fix it switched off (VITE_FIX_IT_PACKAGES=false)', () => 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
+
+describe('Tasks page - Fix it subtasks in Zoho', () => {
+  it('marks the tasks the ESF team has, and the ones it finished', () => {
+    renderTasks([
+      { ...negProfit({ taskId: 'mine', asin: 'B1', error: 'Team has this', amount: 500 }), fixIt: { state: 'with_team' } },
+      { ...negProfit({ taskId: 'done', asin: 'B2', error: 'Team did this', amount: 400 }), status: 'completed', fixIt: { state: 'done_by_team' } },
+      negProfit({ taskId: 'plain', asin: 'B3', error: 'Nobody has this', amount: 300 }),
+    ]);
+    expect(screen.getByText('ESF team is on it')).toBeInTheDocument();
+    expect(screen.getAllByText('ESF team is on it')).toHaveLength(1);
+  });
+});
