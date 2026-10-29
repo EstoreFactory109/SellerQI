@@ -28,6 +28,16 @@ jest.mock('../../../Services/Email/SendEsfReportsEmail.js', () => ({
     createReportsTransport: jest.fn(() => ({ close: jest.fn() })),
 }));
 jest.mock('../../../utils/Logger.js', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
+// Plain functions over module state: resetMocks would strip jest.fn implementations.
+const mockDrive = { ready: false, saves: [], throws: null };
+jest.mock('../../../Services/GoogleDrive/ReportArchive.js', () => ({
+    archiveReadiness: async () => (mockDrive.ready ? { ready: true, reason: null } : { ready: false, reason: 'off' }),
+    saveReportsToDrive: async (args) => {
+        mockDrive.saves.push(args);
+        if (mockDrive.throws) return { saved: 0, failed: args.attachments.length, folder: null };
+        return { saved: args.attachments.length, failed: 0, folder: 'Brand' };
+    },
+}));
 
 const User = require('../../../models/user-auth/userModel.js');
 const Seller = require('../../../models/user-auth/sellerCentralModel.js');
@@ -105,6 +115,9 @@ beforeEach(() => {
     reportPdfFilename.mockImplementation((report, mk) => `${report.name} - ${mk?.country}.pdf`);
     sendEsfReportsEmail.mockResolvedValue('msg-1');
     createReportsTransport.mockReturnValue({ close: jest.fn() });
+    mockDrive.ready = false;
+    mockDrive.saves = [];
+    mockDrive.throws = null;
 });
 
 // Unconditional, so a test that fails before its own cleanup cannot strand fake
@@ -292,5 +305,79 @@ describe('robustness', () => {
 
     it('rejects an unknown cadence rather than silently sending nothing', async () => {
         await expect(runEsfReportsCadence('fortnightly')).rejects.toThrow(/Unknown cadence/);
+    });
+});
+
+describe('Google Drive copy', () => {
+    it('saves nothing to Drive when it is off or not connected', async () => {
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
+
+        const result = await runEsfReportsCadence('weekly');
+
+        expect(mockDrive.saves).toHaveLength(0);
+        expect(result.sent).toBe(1);
+        expect(result.driveSaved).toBe(0);
+    });
+
+    it('saves the same PDFs it emails, for the cadence being run', async () => {
+        mockDrive.ready = true;
+        getEsfAccountReports.mockResolvedValue(reportPayload(['account-overview', 'buybox']));
+
+        const result = await runEsfReportsCadence('weekly');
+
+        expect(mockDrive.saves).toHaveLength(1);
+        const save = mockDrive.saves[0];
+        expect(save.cadence).toBe('weekly');
+        expect(save.client._id).toBe('client1');
+        expect(save.attachments).toBe(sendEsfReportsEmail.mock.calls[0][0].attachments);
+        expect(result.driveSaved).toBe(2);
+        expect(result.sent).toBe(1);
+    });
+
+    it('still emails the client when the Drive save fails', async () => {
+        mockDrive.ready = true;
+        mockDrive.throws = true;
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
+
+        const result = await runEsfReportsCadence('weekly');
+
+        expect(sendEsfReportsEmail).toHaveBeenCalledTimes(1);
+        expect(result.driveFailed).toBe(1);
+    });
+
+    it('keeps a copy for a client with no email, without emailing', async () => {
+        mockDrive.ready = true;
+        stubClients([{ _id: 'c2', firstName: 'NoMail' }]);
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
+
+        const result = await runEsfReportsCadence('weekly');
+
+        expect(mockDrive.saves).toHaveLength(1);
+        expect(sendEsfReportsEmail).not.toHaveBeenCalled();
+        expect(result.driveSaved).toBe(1);
+    });
+
+    it('saves nothing when the cycle has no data', async () => {
+        mockDrive.ready = true;
+
+        await runEsfReportsCadence('weekly');
+
+        expect(mockDrive.saves).toHaveLength(0);
+    });
+
+    it('drive-only saves to Drive and emails no one', async () => {
+        mockDrive.ready = true;
+        getEsfAccountReports.mockResolvedValue(reportPayload(['buybox']));
+
+        const result = await runEsfReportsCadence('weekly', { driveOnly: true });
+
+        expect(mockDrive.saves).toHaveLength(1);
+        expect(sendEsfReportsEmail).not.toHaveBeenCalled();
+        expect(createReportsTransport).not.toHaveBeenCalled();
+        expect(result.sent).toBe(0);
+    });
+
+    it('drive-only refuses to run when Drive is off, rather than doing nothing', async () => {
+        await expect(runEsfReportsCadence('weekly', { driveOnly: true })).rejects.toThrow(/Cannot save to Google Drive/);
     });
 });

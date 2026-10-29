@@ -25,6 +25,11 @@
  * time. The existing weekly job opens a connection per recipient and fans every
  * seller out in parallel; production logs show roughly half of those sends
  * failing with ECONNRESET / EPIPE / SES "451 Timeout waiting for data".
+ *
+ * GOOGLE DRIVE COPY
+ * With GDRIVE_REPORTS_ENABLED=true and a Drive connected (Estore Factory > Google
+ * Drive), the same PDFs are also saved to "SellerQI Reports / <brand> / <cadence>"
+ * (Services/GoogleDrive/ReportArchive.js) — before the email, and never at its expense.
  */
 const logger = require('../../utils/Logger.js');
 const User = require('../../models/user-auth/userModel.js');
@@ -32,6 +37,7 @@ const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const { getEsfAccountReports } = require('../Calculations/EsfAccountReportsService.js');
 const { renderReportPdf, reportPdfFilename, MAX_PDF_ROWS } = require('../Reports/reportPdf.js');
 const { sendEsfReportsEmail, createReportsTransport } = require('../Email/SendEsfReportsEmail.js');
+const { saveReportsToDrive, archiveReadiness } = require('../GoogleDrive/ReportArchive.js');
 
 /**
  * Which report types belong to which cycle. Keys are the report keys from
@@ -130,6 +136,7 @@ const buildAttachmentsForClient = async (client, group) => {
  * @param {object} [options]
  * @param {boolean} [options.force=false] run bi-weekly even on an odd week
  * @param {string}  [options.onlyUserId]  restrict to one client, for testing
+ * @param {boolean} [options.driveOnly=false] save to Google Drive without emailing
  */
 const runEsfReportsCadence = async (cadence, options = {}) => {
     const group = CADENCE_GROUPS[cadence];
@@ -141,21 +148,35 @@ const runEsfReportsCadence = async (cadence, options = {}) => {
     }
 
     const startedAt = Date.now();
+    const runDate = new Date();
+
+    // The same PDFs are also kept in Google Drive, when that is switched on and connected.
+    // Checked once, so a missing connection is one log line rather than one per client.
+    const drive = await archiveReadiness().catch((error) => ({ ready: false, reason: error.message }));
+    if (options.driveOnly && !drive.ready) {
+        throw new Error(`Cannot save to Google Drive: ${drive.reason}`);
+    }
+    if (!drive.ready) logger.info(`[EsfReportsMailer] Not saving to Google Drive: ${drive.reason}`);
+
     let clients = await findEsfClients();
     if (options.onlyUserId) {
         clients = clients.filter((c) => String(c._id) === String(options.onlyUserId));
     }
 
-    logger.info(`[EsfReportsMailer] ${group.label} run starting for ${clients.length} ESF clients`);
+    logger.info(`[EsfReportsMailer] ${group.label} run starting for ${clients.length} ESF clients${options.driveOnly ? ' (Google Drive only, no email)' : ''}`);
 
-    const transport = createReportsTransport();
+    const transport = options.driveOnly ? null : createReportsTransport();
     let sent = 0;
     let failed = 0;
     let nothingToSend = 0;
+    let driveSaved = 0;
+    let driveFailed = 0;
 
     try {
         for (const client of clients) {
-            if (!client.email) {
+            // Without an email there is nothing to send, but the reports are still
+            // worth keeping in Drive.
+            if (!client.email && !drive.ready) {
                 logger.warn(`[EsfReportsMailer] ESF client ${client._id} has no email; skipped`);
                 continue;
             }
@@ -167,6 +188,20 @@ const runEsfReportsCadence = async (cadence, options = {}) => {
             if (!attachments.length) {
                 nothingToSend += 1;
                 logger.info(`[EsfReportsMailer] ${group.label}: nothing available for ${client._id}`);
+                continue;
+            }
+
+            // Before the email, and never thrown: a Drive problem must not cost the client
+            // their email, and an email problem must not cost ESF the copy.
+            if (drive.ready) {
+                const saved = await saveReportsToDrive({ client, cadence, attachments, runDate });
+                driveSaved += saved.saved;
+                driveFailed += saved.failed;
+            }
+
+            if (options.driveOnly) continue;
+            if (!client.email) {
+                logger.warn(`[EsfReportsMailer] ESF client ${client._id} has no email; saved to Drive only`);
                 continue;
             }
 
@@ -184,10 +219,12 @@ const runEsfReportsCadence = async (cadence, options = {}) => {
         }
     } finally {
         // Pooled transports hold sockets open; the run must not leak them.
-        transport.close();
+        transport?.close();
     }
 
-    const result = { cadence, clients: clients.length, sent, failed, nothingToSend, ms: Date.now() - startedAt };
+    const result = {
+        cadence, clients: clients.length, sent, failed, nothingToSend, driveSaved, driveFailed, ms: Date.now() - startedAt,
+    };
     logger.info(`[EsfReportsMailer] ${group.label} run finished: ${JSON.stringify(result)}`);
     return result;
 };

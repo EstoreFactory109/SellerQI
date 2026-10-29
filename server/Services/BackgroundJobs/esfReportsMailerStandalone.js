@@ -105,7 +105,8 @@ if (require.main === module) {
 
             // `--run=weekly` sends that cycle immediately and exits. Used to test a
             // cycle without waiting for its slot; `--force` also overrides the
-            // even-week gate on the bi-weekly cycle.
+            // even-week gate on the bi-weekly cycle. `--drive-only` saves the PDFs to
+            // Google Drive without emailing anyone (needs GDRIVE_REPORTS_ENABLED=true).
             const runArg = process.argv.find((a) => a.startsWith('--run='));
             if (runArg) {
                 const cadence = runArg.split('=')[1];
@@ -114,6 +115,7 @@ if (require.main === module) {
                 const result = await runEsfReportsCadence(cadence, {
                     force,
                     onlyUserId: onlyArg ? onlyArg.split('=')[1] : undefined,
+                    driveOnly: process.argv.includes('--drive-only'),
                 });
                 logger.info(`[EsfReportsMailer] One-off run complete: ${JSON.stringify(result)}`);
                 process.exit(0);

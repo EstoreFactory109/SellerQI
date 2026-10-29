@@ -40,6 +40,8 @@ const INTENTIONALLY_EXCLUDED = {
     // because the admin who happened to run the connect flow was deleted would
     // disconnect the shared ESF inbox for everyone and stop all client mail.
     'GmailConnectionModel.js': 'org-wide singleton - connectedBy is an audit stamp, not ownership',
+    // The ESF Google Drive the report PDFs are saved to: one row for the whole company.
+    'DriveConnectionModel.js': 'org-wide singleton - connectedBy is an audit stamp, not ownership',
 };
 
 /** Purged only when the caller passes includeBillingHistory (admin manual delete). */
