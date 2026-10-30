@@ -232,7 +232,107 @@ const listingFields = handle(async (req) => {
     return { productType, displayName: def.displayName, fields, unsupportedRequired, values };
 });
 
+// ---- Inbound shipments (reads, and preparing options: nothing is committed) ----
+
+const inboundCreds = (req) => require('../../Services/Sp_API/spApiClient.js').credentialsFor(req.userId, req.country, req.region);
+const inboundApi = () => require('../../Services/Sp_API/InboundV2024Service.js');
+const awdRefusal = (error) => error.response?.status === 400 && /Warehousing and Distribution/i.test(JSON.stringify(error.response?.data || ''));
+
+const inboundPlans = handle(async (req) => {
+    const plans = await inboundApi().listPlans(await inboundCreds(req));
+    return { plans: plans.map((p) => ({ inboundPlanId: p.inboundPlanId, name: p.name || '', status: p.status, createdAt: p.createdAt, lastUpdatedAt: p.lastUpdatedAt })) };
+});
+
+const inboundPlanDetail = handle(async (req) => {
+    const c = await inboundCreds(req);
+    const A = inboundApi();
+    const planId = req.params.planId;
+    let plan;
+    try {
+        plan = await A.getPlan(c, planId);
+    } catch (error) {
+        if (awdRefusal(error)) return { awd: true, plan: { inboundPlanId: planId } };
+        throw error;
+    }
+    const [items, packingOptions, placementOptions] = await Promise.all([
+        A.listPlanItems(c, planId).catch(() => []),
+        A.listPackingOptions(c, planId).catch(() => []),
+        A.listPlacementOptions(c, planId).catch(() => [])
+    ]);
+    const shipments = await Promise.all((plan.shipments || []).slice(0, 30).map((s) => A.getShipment(c, planId, s.shipmentId).catch(() => s)));
+    return {
+        plan: { inboundPlanId: plan.inboundPlanId, name: plan.name || '', status: plan.status, createdAt: plan.createdAt, sourceAddress: plan.sourceAddress ? { city: plan.sourceAddress.city, countryCode: plan.sourceAddress.countryCode } : null },
+        items: items.map((i) => ({ msku: i.msku, asin: i.asin, quantity: i.quantity, labelOwner: i.labelOwner })),
+        packingOptions: packingOptions.map((o) => ({ packingOptionId: o.packingOptionId, status: o.status, packingGroups: o.packingGroups || [], fees: o.fees || [], discounts: o.discounts || [] })),
+        placementOptions: placementOptions.map((o) => ({ placementOptionId: o.placementOptionId, status: o.status, shipmentIds: o.shipmentIds || [], fees: o.fees || [] })),
+        shipments: shipments.map((s) => ({
+            shipmentId: s.shipmentId, name: s.name || '', status: s.status || '', amazonReferenceId: s.amazonReferenceId || null,
+            shipmentConfirmationId: s.shipmentConfirmationId || null, warehouseId: s.destination?.warehouseId || null,
+            selectedTransportationOptionId: s.selectedTransportationOptionId || null, selectedDeliveryWindow: s.selectedDeliveryWindow || null
+        }))
+    };
+});
+
+/** Ask Amazon to prepare options (packing, placement, shipping, delivery windows, a quantity change). */
+const inboundPrepare = handle(async (req) => {
+    const c = await inboundCreds(req);
+    const A = inboundApi();
+    const planId = req.params.planId;
+    const { what, shipmentId, readyToShipDate, placementOptionId, items } = req.body || {};
+    let out;
+    if (what === 'packing') out = await A.generatePackingOptions(c, planId);
+    else if (what === 'placement') out = await A.generatePlacementOptions(c, planId);
+    else if (what === 'delivery' && shipmentId) out = await A.generateDeliveryWindowOptions(c, planId, shipmentId);
+    else if (what === 'transport' && placementOptionId) {
+        const start = readyToShipDate ? new Date(readyToShipDate) : new Date(Date.now() + 864e5);
+        const plan = await A.getPlan(c, planId);
+        out = await A.generateTransportationOptions(c, planId, {
+            placementOptionId,
+            shipmentTransportationConfigurations: (plan.shipments || []).map((s) => ({ shipmentId: s.shipmentId, readyToShipWindow: { start: start.toISOString() } }))
+        });
+    } else if (what === 'content' && shipmentId && Array.isArray(items)) {
+        const boxes = await A.listShipmentBoxes(c, planId, shipmentId);
+        out = await A.generateShipmentContentUpdatePreviews(c, planId, shipmentId, {
+            items: items.map((i) => ({ msku: String(i.msku), quantity: Number(i.quantity), prepOwner: i.prepOwner || 'NONE', labelOwner: i.labelOwner || 'SELLER' })),
+            boxes: boxes.map((b) => ({ contentInformationSource: b.contentInformationSource || 'BOX_CONTENT_PROVIDED', dimensions: b.dimensions, weight: b.weight, quantity: b.quantity || 1, items: b.items || [] }))
+        });
+    } else {
+        throw Object.assign(new Error('Nothing to prepare.'), { statusCode: 400 });
+    }
+    return { operationId: out.operationId || null };
+});
+
+const inboundOperation = handle(async (req) => {
+    const op = await inboundApi().getOperation(await inboundCreds(req), req.params.operationId);
+    return { status: op.operationStatus, problems: (op.operationProblems || []).map((p) => p.message || p.code) };
+});
+
+const inboundShipmentOptions = handle(async (req) => {
+    const c = await inboundCreds(req);
+    const A = inboundApi();
+    const { planId, shipmentId } = req.params;
+    const [transport, windows, previews] = await Promise.all([
+        A.listTransportationOptions(c, planId, shipmentId).catch(() => []),
+        A.listDeliveryWindowOptions(c, planId, shipmentId).catch(() => []),
+        A.listShipmentContentUpdatePreviews(c, planId, shipmentId).catch(() => [])
+    ]);
+    return {
+        transportationOptions: transport.map((o) => ({ transportationOptionId: o.transportationOptionId, carrier: o.carrier?.name || '', shippingMode: o.shippingMode, shippingSolution: o.shippingSolution, preconditions: o.preconditions || [], cost: o.quote?.cost || null })),
+        deliveryWindowOptions: windows.map((w) => ({ deliveryWindowOptionId: w.deliveryWindowOptionId, startDate: w.startDate, endDate: w.endDate, availabilityType: w.availabilityType, validUntil: w.validUntil })),
+        contentUpdatePreviews: previews.map((p) => ({ contentUpdatePreviewId: p.contentUpdatePreviewId, expiration: p.expiration, items: p.requestedUpdates?.items || [], cost: p.transportationOption?.quote?.cost || null }))
+    };
+});
+
+const inboundLabels = handle(async (req) => {
+    const c = await inboundCreds(req);
+    const A = inboundApi();
+    const shipment = await A.getShipment(c, req.params.planId, req.params.shipmentId);
+    if (!shipment.shipmentConfirmationId) throw Object.assign(new Error('Labels are ready once the shipping is confirmed.'), { statusCode: 409 });
+    return { url: await A.getLabels(c, shipment.shipmentConfirmationId, { numberOfPackages: Math.min(Math.max(Number(req.query.boxes) || 1, 1), 999) }) };
+});
+
 module.exports = {
+    inboundPlans, inboundPlanDetail, inboundPrepare, inboundOperation, inboundShipmentOptions, inboundLabels,
     listingProductTypes, listingFields,
     notificationSubscriptions,
     unshippedOrders, orderDetail,

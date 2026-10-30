@@ -8,7 +8,7 @@ const auth = require('../middlewares/Auth/auth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
 const c = require('../controllers/actions/AmazonActionsController.js');
 
-const FEATURE = ':feature(ads|listings|messaging|feeds|reports|orders|notifications)';
+const FEATURE = ':feature(ads|listings|messaging|feeds|reports|orders|notifications|inbound)';
 // Mongo ObjectId only, so "approve-many" never matches as an id.
 const ID = ':id([0-9a-fA-F]{24})';
 
@@ -22,6 +22,14 @@ router.get('/reports/pending', auth, getLocation, c.pendingReports);
 router.get('/orders/unshipped', auth, getLocation, c.unshippedOrders);
 router.get('/notifications/subscriptions', auth, getLocation, c.notificationSubscriptions);
 router.get('/listings/product-types', auth, getLocation, c.listingProductTypes);
+const PLAN = ':planId(wf[0-9a-fA-F-]+)';
+const SHIPMENT = ':shipmentId(sh[0-9a-fA-F-]+)';
+router.get('/inbound/plans', auth, getLocation, c.inboundPlans);
+router.get(`/inbound/plans/${PLAN}`, auth, getLocation, c.inboundPlanDetail);
+router.post(`/inbound/plans/${PLAN}/prepare`, auth, getLocation, c.inboundPrepare);
+router.get('/inbound/operations/:operationId([0-9a-zA-Z-]+)', auth, getLocation, c.inboundOperation);
+router.get(`/inbound/plans/${PLAN}/shipments/${SHIPMENT}/options`, auth, getLocation, c.inboundShipmentOptions);
+router.get(`/inbound/plans/${PLAN}/shipments/${SHIPMENT}/labels`, auth, getLocation, c.inboundLabels);
 router.get('/listings/fields', auth, getLocation, c.listingFields);
 router.get('/orders/:orderId(\\d{3}-\\d{7}-\\d{7})', auth, getLocation, c.orderDetail);
 

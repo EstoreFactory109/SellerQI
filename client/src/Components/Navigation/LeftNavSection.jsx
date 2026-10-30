@@ -348,6 +348,9 @@ const LeftNavSection = () => {
                                 {canChange('orders.confirm_shipment') && (
                                     <NavItem to="/seller-central-checker/fbm-orders" icon={Clock8} label="Orders to Ship" locked={isPremiumLocked} />
                                 )}
+                                {canChange('inbound.create_plan') && (
+                                    <NavItem to="/seller-central-checker/shipments" icon={Package} label="Shipments to Amazon" locked={isPremiumLocked} />
+                                )}
                                 <NavItem to="/seller-central-checker/account-history" icon={Clock8} label="Accounts History" locked={isPremiumLocked} />
                                 {/* User Logging - Only for Super Admins */}
                                 {isSuperAdmin && (

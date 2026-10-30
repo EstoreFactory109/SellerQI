@@ -140,6 +140,7 @@ describe('esfPages', () => {
       'account-history': '/api/pagewise/account-history',
       'amazon-changes': '/api/actions/ads/0123456789abcdef01234567/approve',
       'fbm-orders': '/api/actions/orders/unshipped',
+      shipments: '/api/actions/inbound/plans',
     };
 
     Object.entries(LIVE_ENDPOINTS).forEach(([key, path]) => {

@@ -249,11 +249,12 @@ async function pollOne(id) {
             if (Date.now() - started > POLL_GIVE_UP_MS) {
                 return set({ status: 'failed', error: 'Amazon has not finished processing this after a day. Check it in Seller Central.', nextPollAt: null });
             }
-            return set({ nextPollAt: nextPollAfter(doc.pollCount) });
+            // A multi-step change records the step Amazon is on now.
+            return set({ nextPollAt: nextPollAfter(doc.pollCount), ...(out.amazon ? { amazon: out.amazon } : {}) });
         }
         const status = ['succeeded', 'failed', 'cancelled'].includes(out?.status) ? out.status : 'failed';
         logger.info('[ChangeRequest] Amazon finished', { id: String(doc._id), actionType: doc.actionType, status });
-        return set({ status, response: out?.response ?? doc.response, error: out?.error || (status === 'succeeded' ? (out?.note || '') : 'Amazon did not accept the change.'), nextPollAt: null });
+        return set({ status, response: out?.response ?? doc.response, error: out?.error || (status === 'succeeded' ? (out?.note || '') : 'Amazon did not accept the change.'), nextPollAt: null, ...(out?.amazon ? { amazon: out.amazon } : {}) });
     } catch (error) {
         // A failed check is not a failed change: try again later.
         logger.warn('[ChangeRequest] follow-up failed; will retry', { id: String(doc._id), error: error.message });

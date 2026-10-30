@@ -43,6 +43,7 @@ const ESF_CLIENT_PAGES = [
     { key: 'issues', label: 'Issues', group: 'Health' },
     { key: 'review-request', label: 'Review Requests', group: 'Health' },
     { key: 'fbm-orders', label: 'Orders to Ship', group: 'Health' },
+    { key: 'shipments', label: 'Shipments to Amazon', group: 'Optimize' },
     { key: 'account-history', label: 'Account History', group: 'Health' },
     { key: 'user-logging', label: 'User Logging', group: 'Health' },
 
@@ -131,6 +132,7 @@ const API_PATH_TO_PAGE = [
     ['/api/actions/feeds', 'your-products'],
     ['/api/actions/listings', 'your-products'],
     ['/api/actions/orders', 'fbm-orders'],
+    ['/api/actions/inbound', 'shipments'],
     ['/api/actions/messaging', 'fbm-orders'],
     [/^\/api\/actions\/[^/]+\/(?:[0-9a-fA-F]{24}\/approve|approve-many)(?:[/?]|$)/, 'amazon-changes'],
     [/^\/api\/pagewise\/tasks\/approve-actions(?:[/?]|$)/, 'amazon-changes'],
