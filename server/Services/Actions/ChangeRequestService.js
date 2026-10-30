@@ -19,6 +19,11 @@ const { writesDisabled, handlerEnabledFor } = require('./actionGates.js');
 const { userError, isTimeout } = require('./errors.js');
 
 const DRAFT_MINUTES = 30;
+// Following up a change Amazon processes over minutes (feeds, inbound): 15 s, 30 s,
+// 1 min, then every 5 min; after a day it is reported as not finished.
+const POLL_DELAYS_MS = [15000, 30000, 60000];
+const POLL_EVERY_MS = 5 * 60 * 1000;
+const POLL_GIVE_UP_MS = 24 * 60 * 60 * 1000;
 const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 const MAX_PER_REQUEST = 25;
 
@@ -68,7 +73,7 @@ function messageFor(doc) {
         case 'draft': return 'Not sent yet. Review and approve to send it to Amazon.';
         case 'running': return 'Sending to Amazon...';
         case 'awaiting_amazon': return 'Amazon accepted it and is still processing.';
-        case 'succeeded': return 'Done on Amazon.';
+        case 'succeeded': return doc.error ? `Done on Amazon. ${doc.error}` : 'Done on Amazon.';
         case 'stale': return doc.error || 'Amazon changed since this was prepared, so nothing was sent. Review it again.';
         case 'unknown': return 'Amazon did not answer in time. SellerQI is checking whether it went through; it will not be sent again.';
         case 'cancelled': return doc.error || 'Cancelled; nothing was sent.';
@@ -77,19 +82,24 @@ function messageFor(doc) {
     }
 }
 
-function handlerFor(actionType, feature, userId) {
+const isStaff = (by = {}) => !!(by.superAdminId || by.esfUserId || by.adminId);
+
+function handlerFor(actionType, feature, userId, actor = null) {
     const handler = registry.get(actionType);
     if (!handler || (feature && handler.feature !== feature)) throw refusal(404, 'This kind of change is not available.');
     if (!handlerEnabledFor(handler, userId)) throw refusal(403, 'This kind of change is not switched on for this account yet.');
+    if (handler.staffOnly && actor && !isStaff(actor)) throw refusal(403, 'Only the SellerQI team can make this change.');
     return handler;
 }
+
+const nextPollAfter = (pollCount) => new Date(Date.now() + (POLL_DELAYS_MS[pollCount] ?? POLL_EVERY_MS));
 
 /**
  * Validate and preview a change; store it as a draft (unless persist is false).
  * @returns {Promise<Object>} the draft as the browser sees it (or the bare preview when not persisted)
  */
 async function createPreview({ userId, country, region, feature, actionType, input = {}, source = 'screen', createdBy = {}, persist = true }) {
-    const handler = handlerFor(actionType, feature, userId);
+    const handler = handlerFor(actionType, feature, userId, createdBy);
     if (!registry.previewable(handler)) throw refusal(404, 'This kind of change is not available here.');
     const ctx = { userId, country, region };
     const clean = handler.validate ? await handler.validate(input, ctx) : input;
@@ -134,7 +144,7 @@ async function approve({ id, userId, country, region, feature, approvedBy = {} }
 
     let handler;
     try {
-        handler = handlerFor(doc.actionType, doc.feature, userId);
+        handler = handlerFor(doc.actionType, doc.feature, userId, approvedBy);
     } catch (error) {
         return finish({ status: 'failed', error: error.message });
     }
@@ -151,7 +161,7 @@ async function approve({ id, userId, country, region, feature, approvedBy = {} }
         if (handler.staleCheck) await handler.staleCheck(doc, ctx);
         const result = await handler.execute(doc.payload, ctx);
         if (result && result.pending) {
-            return finish({ status: 'awaiting_amazon', amazon: result.amazon || {}, response: result.response || null, nextPollAt: new Date(Date.now() + 15 * 1000) });
+            return finish({ status: 'awaiting_amazon', amazon: result.amazon || {}, response: result.response || null, pollCount: 0, nextPollAt: nextPollAfter(0) });
         }
         logger.info('[ChangeRequest] made on Amazon', { userId: String(userId), country, region, actionType: doc.actionType, id: String(doc._id) });
         return finish({ status: 'succeeded', response: result ?? null, amazon: result?.amazon || doc.amazon || {} });
@@ -201,9 +211,60 @@ async function cancelDraft({ id, userId, country, region }) {
     return view(doc);
 }
 
+/**
+ * Ask Amazon how a change it is processing is doing, once. Claims the request
+ * first (moves nextPollAt on), so two pollers never follow up the same one.
+ * @returns {Promise<Object|null>} the updated request, or null when not due / taken
+ */
+async function pollOne(id) {
+    const now = new Date();
+    const doc = await ChangeRequest.findOneAndUpdate(
+        { _id: id, status: 'awaiting_amazon', nextPollAt: { $lte: now } },
+        { $set: { nextPollAt: new Date(now.getTime() + 2 * 60 * 1000) }, $inc: { pollCount: 1 } },
+        { new: true }
+    ).lean();
+    if (!doc) return null;
+    const handler = registry.get(doc.actionType);
+    const set = async (fields) => view(await ChangeRequest.findOneAndUpdate({ _id: doc._id, status: 'awaiting_amazon' }, { $set: fields }, { new: true }).lean() || doc);
+    if (!handler?.poll) return set({ status: 'failed', error: 'SellerQI cannot follow up this change.', nextPollAt: null });
+    const started = new Date(doc.approvedAt || doc.createdAt).getTime();
+    try {
+        const out = await handler.poll(doc, { userId: doc.userId, country: doc.country, region: doc.region });
+        if (out?.status === 'pending') {
+            if (Date.now() - started > POLL_GIVE_UP_MS) {
+                return set({ status: 'failed', error: 'Amazon has not finished processing this after a day. Check it in Seller Central.', nextPollAt: null });
+            }
+            return set({ nextPollAt: nextPollAfter(doc.pollCount) });
+        }
+        const status = ['succeeded', 'failed', 'cancelled'].includes(out?.status) ? out.status : 'failed';
+        logger.info('[ChangeRequest] Amazon finished', { id: String(doc._id), actionType: doc.actionType, status });
+        return set({ status, response: out?.response ?? doc.response, error: out?.error || (status === 'succeeded' ? (out?.note || '') : 'Amazon did not accept the change.'), nextPollAt: null });
+    } catch (error) {
+        // A failed check is not a failed change: try again later.
+        logger.warn('[ChangeRequest] follow-up failed; will retry', { id: String(doc._id), error: error.message });
+        return set({ nextPollAt: nextPollAfter(Math.max(doc.pollCount, POLL_DELAYS_MS.length)) });
+    }
+}
+
+/** Follow up every change that is due (the cron poller). */
+async function pollDue({ limit = 20 } = {}) {
+    const due = await ChangeRequest.find({ status: 'awaiting_amazon', nextPollAt: { $lte: new Date() } })
+        .sort({ nextPollAt: 1 }).limit(limit).select('_id').lean();
+    let done = 0;
+    for (const d of due) {
+        if (await pollOne(d._id).catch(() => null)) done += 1;
+    }
+    return { due: due.length, polled: done };
+}
+
 async function get({ id, userId, country, region }) {
-    const doc = await ChangeRequest.findOne({ _id: id, userId, country, region }).lean();
+    let doc = await ChangeRequest.findOne({ _id: id, userId, country, region }).lean();
     if (!doc) throw refusal(404, 'Change not found.');
+    // The approval window polls this while Amazon works: follow up when due.
+    if (doc.status === 'awaiting_amazon' && doc.nextPollAt && new Date(doc.nextPollAt) <= new Date()) {
+        await pollOne(doc._id).catch(() => null);
+        doc = await ChangeRequest.findOne({ _id: id, userId, country, region }).lean();
+    }
     return view(doc);
 }
 
@@ -216,18 +277,18 @@ async function list({ userId, country, region, feature = null, limit = 20 }) {
 }
 
 /** Which kinds of change this account can make (the client shows buttons from this). */
-function capabilities(userId) {
+function capabilities(userId, actor = {}) {
     const disabled = writesDisabled();
     const byFeature = {};
     for (const handler of registry.all()) {
         if (!registry.previewable(handler)) continue;
-        const enabled = !disabled && handlerEnabledFor(handler, userId);
+        const enabled = !disabled && handlerEnabledFor(handler, userId) && (!handler.staffOnly || isStaff(actor));
         (byFeature[handler.feature] ||= []).push({ actionType: handler.actionType, enabled });
     }
     return { writesDisabled: disabled, features: byFeature };
 }
 
 module.exports = {
-    createPreview, approve, approveMany, runApproved, cancelDraft, get, list, capabilities,
+    createPreview, approve, approveMany, runApproved, cancelDraft, get, list, capabilities, pollOne, pollDue,
     idempotencyKeyFor, canonical, DRAFT_MINUTES, MAX_PER_REQUEST
 };

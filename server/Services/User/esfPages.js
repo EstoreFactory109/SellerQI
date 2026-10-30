@@ -127,6 +127,7 @@ const API_PATH_TO_PAGE = [
     // Changes on Amazon (api/app.js mounts both behind the guards). Preparing a change
     // needs the page it is made from; sending it needs "amazon-changes".
     ['/api/actions/ads', 'ppc-dashboard'],
+    ['/api/actions/feeds', 'your-products'],
     [/^\/api\/actions\/[^/]+\/(?:[0-9a-fA-F]{24}\/approve|approve-many)(?:[/?]|$)/, 'amazon-changes'],
     [/^\/api\/pagewise\/tasks\/approve-actions(?:[/?]|$)/, 'amazon-changes'],
     ['/api/listings', 'amazon-changes'],

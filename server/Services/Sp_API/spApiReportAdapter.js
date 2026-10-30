@@ -153,7 +153,26 @@ async function runSpApiReportInline({ accessToken, baseuri, body, retries = 0, p
     return { status: 'FAILED', note: 'no attempt made' };
 }
 
+/**
+ * A report request's current state, and cancelling one that has not started
+ * (SP-API: only IN_QUEUE reports can be cancelled). Used by the approved
+ * reports.cancel_report change.
+ */
+async function getSpApiReport(accessToken, baseuri, reportId) {
+    const res = await axios.get(`https://${String(baseuri).replace(/^https?:\/\//, '')}/reports/2021-06-30/reports/${encodeURIComponent(reportId)}`,
+        { headers: { 'x-amz-access-token': accessToken }, timeout: 30000 });
+    return res.data || {};
+}
+
+async function cancelSpApiReport(accessToken, baseuri, reportId) {
+    await axios.delete(`https://${String(baseuri).replace(/^https?:\/\//, '')}/reports/2021-06-30/reports/${encodeURIComponent(reportId)}`,
+        { headers: { 'x-amz-access-token': accessToken }, timeout: 30000 });
+    return { reportId, cancelled: true };
+}
+
 module.exports = {
+    getSpApiReport,
+    cancelSpApiReport,
     mapSpApiStatus,
     checkSpApiStatusOnce,
     checkSpApiStatusOnceNoDataOnCancel,

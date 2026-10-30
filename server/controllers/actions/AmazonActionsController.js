@@ -36,7 +36,7 @@ const handle = (fn) => asyncHandler(async (req, res) => {
     }
 });
 
-const getCapabilities = handle(async (req) => ChangeRequestService.capabilities(req.userId));
+const getCapabilities = handle(async (req) => ChangeRequestService.capabilities(req.userId, approverOf(req)));
 
 const getHistory = handle(async (req) => ({
     changes: await ChangeRequestService.list({ ...scope(req), feature: req.query.feature || null, limit: req.query.limit })
@@ -114,7 +114,43 @@ const adsNewCampaignOptions = handle(async (req) => {
     return { products, suggestions };
 });
 
+// Every report type SellerQI requests (Services/Sp_API/*).
+const SELLERQI_REPORT_TYPES = [
+    'GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA', 'GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA', 'GET_FBA_FULFILLMENT_INBOUND_NONCOMPLIANCE_DATA',
+    'GET_FBA_FULFILLMENT_LONGTERM_STORAGE_FEE_CHARGES_DATA', 'GET_FBA_FULFILLMENT_REMOVAL_ORDER_DETAIL_DATA', 'GET_FBA_INVENTORY_PLANNING_DATA',
+    'GET_FBA_REIMBURSEMENTS_DATA', 'GET_FBA_STORAGE_FEE_CHARGES_DATA', 'GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL',
+    'GET_LEDGER_DETAIL_VIEW_DATA', 'GET_LEDGER_SUMMARY_VIEW_DATA', 'GET_MERCHANTS_LISTINGS_FYP_REPORT', 'GET_MERCHANT_LISTINGS_ALL_DATA',
+    'GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT', 'GET_SELLER_FEEDBACK_DATA', 'GET_STRANDED_INVENTORY_UI_DATA',
+    'GET_V1_SELLER_PERFORMANCE_REPORT', 'GET_V2_SELLER_PERFORMANCE_REPORT'
+];
+
+/** SellerQI's own report requests still waiting at Amazon (staff only: housekeeping). */
+const pendingReports = handle(async (req) => {
+    const by = approverOf(req);
+    if (!(by.superAdminId || by.esfUserId || by.adminId)) throw Object.assign(new Error('Only the SellerQI team can see this.'), { statusCode: 403 });
+    const axios = require('axios');
+    const { credentialsFor } = require('../../Services/Sp_API/spApiClient.js');
+    const creds = await credentialsFor(req.userId, req.country, req.region);
+    // Amazon lists reports only by type (at most 10 types per request).
+    const found = [];
+    for (let i = 0; i < SELLERQI_REPORT_TYPES.length; i += 10) {
+        const res = await axios.get(`${creds.host}/reports/2021-06-30/reports`, {
+            headers: { 'x-amz-access-token': creds.accessToken },
+            params: { reportTypes: SELLERQI_REPORT_TYPES.slice(i, i + 10).join(','), processingStatuses: 'IN_QUEUE,IN_PROGRESS', pageSize: 100 },
+            timeout: 30000
+        });
+        found.push(...(res.data?.reports || []));
+    }
+    return {
+        reports: found.map((r) => ({
+            reportId: String(r.reportId), reportType: r.reportType, status: r.processingStatus,
+            createdTime: r.createdTime, processingStartTime: r.processingStartTime || null
+        }))
+    };
+});
+
 module.exports = {
+    pendingReports,
     getCapabilities, getHistory, preview, approve, approveMany, getOne, cancel, approverOf,
     adsCampaigns, adsCampaignAdGroups, adsNewCampaignOptions
 };

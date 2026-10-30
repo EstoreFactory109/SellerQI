@@ -255,6 +255,16 @@ async function start() {
         logger.error('[CronProducerStandalone] FX rates init failed', { error: error?.message });
     }
 
+    // Changes on Amazon still being processed (bulk feeds, inbound shipments): followed
+    // up once a minute. Same reasoning as the Zoho block above.
+    try {
+        const { setupCron: setupAmazonActionsPoller } = require('./amazonActionsPoller.js');
+        setupAmazonActionsPoller();
+        logger.info('[CronProducerStandalone] Amazon actions poller initialized');
+    } catch (error) {
+        logger.error('[CronProducerStandalone] Amazon actions poller init failed', { error: error?.message });
+    }
+
     logger.info('[CronProducerStandalone] Started successfully — running all cron schedules');
 
     // Graceful shutdown: stop accepting new cron ticks, let in-flight work finish.

@@ -37,6 +37,9 @@ import { useTopProducts } from '../../hooks/useTopProducts.js';
 import axiosInstance from '../../config/axios.config.js';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
+import BulkStockUpdate from '../../Components/Products/BulkStockUpdate.jsx';
+import ChangeHistoryPanel from '../../Components/Actions/ChangeHistoryPanel.jsx';
+import PendingReportsPanel from '../../Components/Actions/PendingReportsPanel.jsx';
 
 // Exactly 6 columns: 4 fixed (ASIN/SKU, Name, Issues or Recommendation, View) + 2 chosen from dropdown.
 // Product tabs: pick 2 from this list to fill columns 5 and 6.
@@ -260,6 +263,8 @@ const ProductThumb = ({ src }) => (
 );
 
 const YourProducts = () => {
+  // Bumped after a bulk stock update is sent, so the history panel reloads.
+  const [changesRefresh, setChangesRefresh] = useState(0);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { askQMate } = useQMate();
@@ -915,6 +920,7 @@ const YourProducts = () => {
           </div>
           <div className="flex items-center gap-2">
           <MarketplaceSwitcher />
+          <BulkStockUpdate onSent={() => setChangesRefresh((n) => n + 1)} />
           <DownloadReport
             prepareDataFunc={prepareYourProductsExport}
             filename="Your_Products_Report"
@@ -924,6 +930,10 @@ const YourProducts = () => {
           />
           </div>
         </div>
+
+        {/* Bulk stock updates SellerQI sent to Amazon, and (team only) stuck report requests */}
+        <ChangeHistoryPanel feature="feeds" title="Bulk stock updates" refreshKey={changesRefresh} />
+        <PendingReportsPanel />
 
         {/* Summary tiles — real data, restyled with the shared KPICard/StatusPill components */}
         <div className="w-full grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">

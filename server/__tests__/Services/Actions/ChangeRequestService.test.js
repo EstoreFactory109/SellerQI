@@ -11,6 +11,7 @@ const matches = (doc, filter) => Object.entries(filter).every(([k, v]) => {
         if ('$ne' in v) return String(val) !== String(v.$ne);
         if ('$gt' in v) return val instanceof Date && val > v.$gt;
         if ('$gte' in v) return val instanceof Date && val >= v.$gte;
+        if ('$lte' in v) return val instanceof Date && val <= v.$lte;
         return false;
     }
     return String(val) === String(v);
@@ -20,11 +21,14 @@ jest.mock('../../../models/MCP/AmazonChangeRequestModel.js', () => ({
     create: async (doc) => { const d = { _id: `id${++mockSeq}`, createdAt: new Date(), ...doc }; mockDocs.push(d); return d; },
     findOneAndUpdate: (filter, update) => {
         const doc = mockDocs.find((d) => matches(d, filter));
-        if (doc) Object.assign(doc, update.$set);
+        if (doc) {
+            Object.assign(doc, update.$set);
+            for (const [k, n] of Object.entries(update.$inc || {})) doc[k] = (doc[k] || 0) + n;
+        }
         return lean(doc ? { ...doc } : null);
     },
     findOne: (filter) => lean(mockDocs.find((d) => matches(d, filter)) || null),
-    find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [...mockDocs] }) }) })
+    find: (filter) => ({ sort: () => ({ limit: () => ({ lean: async () => [...mockDocs].filter((d) => !filter?.status || typeof filter.status !== 'string' || d.status === filter.status), select: () => ({ lean: async () => mockDocs.filter((d) => d.status === filter.status && d.nextPollAt <= new Date()).map((d) => ({ _id: d._id })) }) }) }) })
 }));
 
 const mockSent = [];
@@ -143,5 +147,69 @@ describe('ChangeRequestService', () => {
         const k1 = S.idempotencyKeyFor({ ...base, actionType: 'a', payload: { x: 1, y: [1, { b: 2, a: 1 }] } });
         const k2 = S.idempotencyKeyFor({ ...base, actionType: 'a', payload: { y: [1, { a: 1, b: 2 }], x: 1 } });
         expect(k1).toBe(k2);
+    });
+});
+
+describe('following up a change Amazon is still processing', () => {
+    let mockPoll;
+    const slowHandler = () => fakeHandler({
+        actionType: 'ads.fake',
+        execute: async () => ({ pending: true, amazon: { feedId: 'F1' } }),
+        poll: async () => mockPoll()
+    });
+    const sendSlow = async () => {
+        mockHandler = slowHandler();
+        const d = await draft();
+        const r = await S.approve({ ...base, id: d.id, feature: 'ads' });
+        expect(r.status).toBe('awaiting_amazon');
+        mockDocs[0].nextPollAt = new Date(Date.now() - 1000); // due now
+        return d;
+    };
+
+    it('keeps waiting while Amazon works, then records the outcome', async () => {
+        await sendSlow();
+        mockPoll = async () => ({ status: 'pending' });
+        await S.pollOne(mockDocs[0]._id);
+        expect(mockDocs[0].status).toBe('awaiting_amazon');
+        expect(mockDocs[0].nextPollAt > new Date()).toBe(true);
+        mockDocs[0].nextPollAt = new Date(Date.now() - 1000);
+        mockPoll = async () => ({ status: 'succeeded', response: { accepted: 3 }, note: '3 updated.' });
+        const r = await S.pollOne(mockDocs[0]._id);
+        expect(r.status).toBe('succeeded');
+        expect(r.message).toBe('Done on Amazon. 3 updated.');
+    });
+
+    it('does not follow up a change that is not due yet', async () => {
+        await sendSlow();
+        mockDocs[0].nextPollAt = new Date(Date.now() + 60000);
+        mockPoll = async () => { throw new Error('should not be called'); };
+        expect(await S.pollOne(mockDocs[0]._id)).toBeNull();
+    });
+
+    it('a failed check is retried later, not recorded as a failed change', async () => {
+        await sendSlow();
+        mockPoll = async () => { throw new Error('socket hang up'); };
+        await S.pollOne(mockDocs[0]._id);
+        expect(mockDocs[0].status).toBe('awaiting_amazon');
+    });
+
+    it('gives up after a day and says so', async () => {
+        await sendSlow();
+        mockDocs[0].approvedAt = new Date(Date.now() - 25 * 60 * 60 * 1000);
+        mockPoll = async () => ({ status: 'pending' });
+        const r = await S.pollOne(mockDocs[0]._id);
+        expect(r.status).toBe('failed');
+        expect(r.error).toContain('after a day');
+    });
+});
+
+describe('staff-only changes', () => {
+    it('cannot be prepared or offered without a staff session', async () => {
+        mockHandler = fakeHandler({ staffOnly: true });
+        await expect(draft()).rejects.toMatchObject({ statusCode: 403 });
+        expect(S.capabilities('U1', { userId: 'U1' }).features.ads[0].enabled).toBe(false);
+        expect(S.capabilities('U1', { userId: 'U1', esfUserId: 'E1' }).features.ads[0].enabled).toBe(true);
+        const d = await S.createPreview({ ...base, feature: 'ads', actionType: 'ads.fake', input: { ids: ['K1'] }, createdBy: { superAdminId: 'SA' } });
+        await expect(S.approve({ ...base, id: d.id, feature: 'ads', approvedBy: { userId: 'U1' } })).resolves.toMatchObject({ status: 'failed' });
     });
 });

@@ -9,22 +9,7 @@
  * nothing is sent.
  */
 const axios = require('axios');
-const Seller = require('../../models/user-auth/sellerCentralModel.js');
-const { generateAccessToken } = require('./GenerateTokens.js');
-const { URIs, marketplaceConfig } = require('../../controllers/config/config.js');
-
-const hostOf = (baseUri) => `https://${String(baseUri || '').replace(/^https?:\/\//, '').replace(/\/$/, '')}`;
-
-async function credentialsFor(userId, country, region) {
-    const seller = await Seller.findOne({ User: userId }).select('sellerAccount.country sellerAccount.region sellerAccount.spiRefreshToken').lean();
-    const account = (seller?.sellerAccount || []).find(a => a.country === country && a.region === region);
-    if (!account?.spiRefreshToken) throw new Error('Seller Central is not connected for this marketplace.');
-    const marketplaceId = marketplaceConfig[country];
-    if (!URIs[region] || !marketplaceId) throw new Error(`Unsupported marketplace ${region}/${country}.`);
-    const accessToken = await generateAccessToken(userId, account.spiRefreshToken);
-    if (!accessToken) throw new Error('Could not get an Amazon access token.');
-    return { accessToken, host: hostOf(URIs[region]), marketplaceId };
-}
+const { credentialsFor } = require('./spApiClient.js');
 
 /** The message actions Amazon allows for this order now (a read). */
 async function allowedMessageActions({ accessToken, host, marketplaceId, orderId }) {
