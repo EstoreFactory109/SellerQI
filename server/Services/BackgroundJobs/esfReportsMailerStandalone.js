@@ -106,7 +106,7 @@ if (require.main === module) {
             // `--run=weekly` sends that cycle immediately and exits. Used to test a
             // cycle without waiting for its slot; `--force` also overrides the
             // even-week gate on the bi-weekly cycle. `--drive-only` saves the PDFs to
-            // Google Drive without emailing anyone (needs GDRIVE_REPORTS_ENABLED=true).
+            // Google Drive without emailing anyone (needs a connected Drive).
             const runArg = process.argv.find((a) => a.startsWith('--run='));
             if (runArg) {
                 const cadence = runArg.split('=')[1];
