@@ -162,7 +162,7 @@ async function approve({ id, userId, country, region, feature, approvedBy = {} }
             return finish({ status: 'unknown', error: error.message, nextPollAt: new Date(Date.now() + 60 * 1000) });
         }
         logger.warn('[ChangeRequest] failed', { id: String(doc._id), actionType: doc.actionType, error: error.message });
-        return finish({ status: 'failed', error: String(error.message || 'Amazon did not accept the change.').slice(0, 1000), response: error.response ?? null });
+        return finish({ status: 'failed', error: String(error.message || 'Amazon did not accept the change.').slice(0, 1000), response: error.response ?? null, amazon: error.amazon || doc.amazon || {} });
     }
 }
 

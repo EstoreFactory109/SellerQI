@@ -66,4 +66,55 @@ const getOne = handle(async (req) => ChangeRequestService.get({ ...scope(req), i
 
 const cancel = handle(async (req) => ChangeRequestService.cancelDraft({ ...scope(req), id: req.params.id }));
 
-module.exports = { getCapabilities, getHistory, preview, approve, approveMany, getOne, cancel, approverOf };
+// ---- Reads the advertising screens need (nothing changes on Amazon) ----
+
+/** Live campaigns in every state (the daily snapshot keeps enabled ones only). */
+const adsCampaigns = handle(async (req) => {
+    const { adsCreds } = require('../../Services/Actions/handlers/ads.js');
+    const SpWrites = require('../../Services/AmazonAds/SpWrites.js');
+    const creds = await adsCreds(scope(req));
+    const states = req.query.includeArchived === 'true' ? SpWrites.ALL_STATES : ['ENABLED', 'PAUSED'];
+    const campaigns = await SpWrites.listCampaigns(creds, { states });
+    return {
+        campaigns: campaigns.slice(0, 500).map((c) => ({
+            campaignId: String(c.campaignId), name: c.name, state: c.state, targetingType: c.targetingType,
+            dailyBudget: Number(c.budget?.budget) || null, startDate: c.startDate || null,
+            biddingStrategy: c.dynamicBidding?.strategy || null
+        })),
+        total: campaigns.length
+    };
+});
+
+/** One campaign's ad groups (live). */
+const adsCampaignAdGroups = handle(async (req) => {
+    const { adsCreds } = require('../../Services/Actions/handlers/ads.js');
+    const SpWrites = require('../../Services/AmazonAds/SpWrites.js');
+    const creds = await adsCreds(scope(req));
+    const groups = await SpWrites.listAdGroups(creds, { campaignIds: [req.params.campaignId], states: ['ENABLED', 'PAUSED'] });
+    return { adGroups: groups.map((g) => ({ adGroupId: String(g.adGroupId), campaignId: String(g.campaignId), name: g.name, state: g.state, defaultBid: Number(g.defaultBid) || null })) };
+});
+
+/** Products to advertise, and Amazon's keyword suggestions for one of them. */
+const adsNewCampaignOptions = handle(async (req) => {
+    const Seller = require('../../models/user-auth/sellerCentralModel.js');
+    const seller = await Seller.findOne({ User: req.userId }).select('sellerAccount.country sellerAccount.region sellerAccount.products.asin sellerAccount.products.sku sellerAccount.products.status sellerAccount.products.itemName').lean();
+    const account = (seller?.sellerAccount || []).find((a) => a.country === req.country && a.region === req.region);
+    const products = (account?.products || []).filter((p) => p.sku && p.asin && p.status === 'Active')
+        .map((p) => ({ sku: p.sku, asin: p.asin, name: p.itemName || '' })).slice(0, 2000);
+    let suggestions = [];
+    const asin = String(req.query.asin || '').trim().toUpperCase();
+    if (asin) {
+        const { AsinKeywordRecommendations } = require('../../models/amazon-ads/KeywordRecommendationsModel.js');
+        const doc = await AsinKeywordRecommendations.findOne({ userId: String(req.userId), country: req.country, region: req.region, asin }).lean();
+        suggestions = (doc?.keywordTargetList || []).slice(0, 100).map((k) => {
+            const best = (k.bidInfo || []).find((b) => b.matchType === 'EXACT') || (k.bidInfo || [])[0] || {};
+            return { keywordText: k.keyword, matchType: best.matchType || 'EXACT', suggestedBid: Number(best.suggestedBid?.rangeMedian || best.bid) || null };
+        });
+    }
+    return { products, suggestions };
+});
+
+module.exports = {
+    getCapabilities, getHistory, preview, approve, approveMany, getOne, cancel, approverOf,
+    adsCampaigns, adsCampaignAdGroups, adsNewCampaignOptions
+};

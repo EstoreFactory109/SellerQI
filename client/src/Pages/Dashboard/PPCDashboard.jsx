@@ -70,6 +70,9 @@ import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx';
 import axiosInstance from '../../config/axios.config.js';
 import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 import { useChangeRequest } from '../../Components/Actions/ChangeRequestModal.jsx';
+import CampaignManager from '../../Components/PPC/CampaignManager.jsx';
+import HarvestKeywordDialog from '../../Components/PPC/HarvestKeywordDialog.jsx';
+import useActionCapabilities from '../../hooks/useActionCapabilities.js';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -243,6 +246,9 @@ const PPCDashboard = () => {
   const dispatch = useDispatch();
   // Every change on Amazon from this page is previewed and approved first.
   const { requestChange, changeModal } = useChangeRequest();
+  const { can: canChange } = useActionCapabilities();
+  // A selling search term being added as a keyword (Auto Insights tab).
+  const [harvest, setHarvest] = useState(null);
   // The seller closed the approval window: no change, no message.
   const notApproved = (outcome) => outcome?.status === 'closed' || outcome?.status === 'cancelled';
   const approvedOrThrow = (outcome, fallback) => {
@@ -2170,6 +2176,9 @@ const PPCDashboard = () => {
           {/* KPI Cards + engagement mini-stats - skeleton when summary loading */}
           <CampaignAuditKpis kpiData={kpiData} loading={ppcKPISummaryLoading} />
 
+          {/* Manage campaigns (pause / enable / archive, new campaigns, ad groups, keywords) - shown once switched on */}
+          <CampaignManager onChanged={refetchPPCData} />
+
           {/* Performance Chart - skeleton when summary loading */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -2936,6 +2945,16 @@ const PPCDashboard = () => {
                                   <tr key={idx} className="transition-colors hover:bg-[#1A202B]" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
                                   <td className="w-[20%] py-3.5 px-3 text-sm font-semibold break-words" style={{ color: COLORS.textPrimary }}>
                                     {insight.searchTerm}
+                                    {canChange('ads.add_keywords') && insight.searchTerm && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setHarvest({ searchTerm: insight.searchTerm, defaultBid: cpc })}
+                                        className="block mt-1 text-xs font-semibold"
+                                        style={{ color: COLORS.accent, background: 'transparent' }}
+                                      >
+                                        Add as keyword
+                                      </button>
+                                    )}
                                   </td>
                                   <td className="w-[22%] py-3.5 px-3 text-[13px] break-words" style={{ color: COLORS.textSecondary }}>
                                     {insight.campaignName}
@@ -2982,6 +3001,18 @@ const PPCDashboard = () => {
       {/* Success / Error feedback popup for pause keyword */}
       <AnimatePresence>
         {changeModal}
+        {harvest && (
+          <HarvestKeywordDialog
+            searchTerm={harvest.searchTerm}
+            defaultBid={harvest.defaultBid}
+            onCancel={() => setHarvest(null)}
+            onReview={async (input) => {
+              setHarvest(null);
+              const outcome = await requestChange({ feature: 'ads', actionType: 'ads.add_keywords', input });
+              if (outcome?.status === 'succeeded') setFeedbackPopup({ show: true, type: 'success', message: 'Keyword added on Amazon.' });
+            }}
+          />
+        )}
         {feedbackPopup.show && (
           <motion.div
             initial={{ opacity: 0, y: -12 }}

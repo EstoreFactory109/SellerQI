@@ -17,6 +17,7 @@ const HANDLERS = new Map();
 
 for (const mod of [
     require('./handlers/ads.js'),
+    require('./handlers/adsCampaigns.js'),
     require('./handlers/listings.js'),
     require('./handlers/messaging.js')
 ]) {

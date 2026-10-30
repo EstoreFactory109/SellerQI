@@ -14,6 +14,11 @@ const ID = ':id([0-9a-fA-F]{24})';
 
 router.get('/capabilities', auth, getLocation, c.getCapabilities);
 router.get('/history', auth, getLocation, c.getHistory);
+// Reads for the advertising screens (guarded as the PPC page).
+router.get('/ads/campaigns', auth, getLocation, c.adsCampaigns);
+router.get('/ads/campaigns/:campaignId([0-9]+)/ad-groups', auth, getLocation, c.adsCampaignAdGroups);
+router.get('/ads/new-campaign-options', auth, getLocation, c.adsNewCampaignOptions);
+
 router.post(`/${FEATURE}/preview`, auth, getLocation, c.preview);
 router.post(`/${FEATURE}/approve-many`, auth, getLocation, c.approveMany);
 router.post(`/${FEATURE}/${ID}/approve`, auth, getLocation, c.approve);
