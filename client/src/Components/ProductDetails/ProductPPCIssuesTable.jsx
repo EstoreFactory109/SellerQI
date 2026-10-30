@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { motion } from 'framer-motion';
 import { AlertTriangle, TrendingUp, Info, CheckCircle, DollarSign, Search, Loader2, Pause, Ban, MoreVertical } from 'lucide-react';
 import { formatCurrencyWithLocale } from '../../utils/currencyUtils.js';
-import axiosInstance from '../../config/axios.config.js';
+import { useChangeRequest } from '../Actions/ChangeRequestModal.jsx';
 import {
     fetchProductPPCKeywordTabCounts,
     fetchProductWastedSpendKeywords,
@@ -68,6 +68,14 @@ export const ProductPPCIssuesTable = ({ data, currency = '$', asin }) => {
     const [addingNegId, setAddingNegId] = useState(null);
     const [pauseAndNegId, setPauseAndNegId] = useState(null);
     const [feedbackPopup, setFeedbackPopup] = useState({ show: false, type: 'success', message: '' });
+    // Every change on Amazon from this table is previewed and approved first.
+    const { requestChange, changeModal } = useChangeRequest();
+    const runChange = async (actionType, input, fallback) => {
+        const outcome = await requestChange({ feature: 'ads', actionType, input });
+        if (outcome?.status === 'closed' || outcome?.status === 'cancelled') return false;
+        if (outcome?.status !== 'succeeded') throw new Error(outcome?.message || fallback);
+        return true;
+    };
 
     // Close action menu on outside click
     useEffect(() => {
@@ -100,7 +108,7 @@ export const ProductPPCIssuesTable = ({ data, currency = '$', asin }) => {
         if (id == null || id === '') return;
         setPausingId(id);
         try {
-            await axiosInstance.post('/api/pagewise/ads/pause-keyword', { keywordId: String(id), adType: 'SP' });
+            if (!(await runChange('ads.pause_keywords', { keywordIds: [String(id)], adType: 'SP' }, 'Failed to pause keyword'))) return;
             refreshWastedSpend();
             setFeedbackPopup({ show: true, type: 'success', message: 'Keyword paused successfully.' });
         } catch (err) {
@@ -116,10 +124,10 @@ export const ProductPPCIssuesTable = ({ data, currency = '$', asin }) => {
         setAddingNegId(kw.keywordId);
         const matchType = (kw.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
         try {
-            await axiosInstance.post('/api/pagewise/ads/add-to-negative', {
-                keywords: [{ campaignId: String(kw.campaignId), adGroupId: String(kw.adGroupId), keywordText: kw.keyword, matchType }],
+            if (!(await runChange('ads.add_negative_keywords', {
+                keywords: [{ campaignId: String(kw.campaignId), adGroupId: String(kw.adGroupId), keywordText: kw.keyword, matchType, campaignName: kw.campaignName, adGroupName: kw.adGroupName }],
                 level: 'adGroup'
-            });
+            }, 'Failed to add to negative.'))) return;
             refreshWastedSpend();
             setFeedbackPopup({ show: true, type: 'success', message: 'Keyword added to negative keywords.' });
         } catch (err) {
@@ -135,10 +143,10 @@ export const ProductPPCIssuesTable = ({ data, currency = '$', asin }) => {
         setPauseAndNegId(kw.keywordId);
         const matchType = (kw.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
         try {
-            await axiosInstance.post('/api/pagewise/ads/pause-and-add-to-negative', {
-                keywordId: String(kw.keywordId), campaignId: String(kw.campaignId), adGroupId: String(kw.adGroupId),
-                keywordText: kw.keyword, matchType, adType: 'SP'
-            });
+            if (!(await runChange('ads.pause_and_negate', {
+                items: [{ keywordId: String(kw.keywordId), campaignId: String(kw.campaignId), adGroupId: String(kw.adGroupId), keywordText: kw.keyword, matchType, campaignName: kw.campaignName }],
+                adType: 'SP'
+            }, 'Failed to pause and add to negative.'))) return;
             refreshWastedSpend();
             setFeedbackPopup({ show: true, type: 'success', message: 'Keyword paused and added to negative.' });
         } catch (err) {
@@ -570,6 +578,7 @@ export const ProductPPCIssuesTable = ({ data, currency = '$', asin }) => {
 
     return (
         <div className="mt-6 space-y-6">
+            {changeModal}
             {/* Feedback popup */}
             {feedbackPopup.show && (
                 <div className={`fixed top-6 right-6 z-50 px-4 py-3 rounded-lg border shadow-lg text-sm ${

@@ -17,6 +17,13 @@ import { trackEvent } from '../../utils/analytics.js';
  * @param {() => void} props.onClose
  * @param {(taskId: string) => void} props.onApproved - called once Amazon accepted the change
  */
+/** What the change touches, in the seller's words. */
+export const targetSentence = (action) => {
+  if (action?.editable || action?.type === 'update_listing_content') return 'This changes your product listing on Amazon.';
+  if (action?.type === 'request_feedback_update') return 'This sends Amazon\'s standard message to the buyer.';
+  return 'This changes your Amazon Ads account.';
+};
+
 const FIELD_LABEL = { title: 'New title', bulletpoints: 'New bullet points (one per line)', description: 'New description', generic_keyword: 'New backend keywords' };
 
 const ApproveChangeModal = ({ task, onClose, onApproved }) => {
@@ -157,9 +164,7 @@ const ApproveChangeModal = ({ task, onClose, onApproved }) => {
           )}
           {!done && (
             <p className="m-0 mt-3 text-xs leading-relaxed" style={{ color: COLORS.textSecondary }}>
-              {editable
-                ? 'This changes your product listing on Amazon. Nothing is sent until you approve, and every change is recorded with who approved it.'
-                : 'This changes your Amazon Ads account. Nothing is sent until you approve, and every change is recorded with who approved it.'}
+              {`${targetSentence(action)} Nothing is sent until you approve, and every change is recorded with who approved it.`}
             </p>
           )}
           {done && (

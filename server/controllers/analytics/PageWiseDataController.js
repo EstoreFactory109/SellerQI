@@ -879,7 +879,7 @@ const approveTaskActions = asyncHandler(async (req, res) => {
         taskIds,
         // Text the seller approved for listing fixes, keyed by taskId; ignored for every other change.
         content: content && typeof content === 'object' ? content : {},
-        approvedBy: { userId: req.userId, memberId: req.memberId, adminId: req.adminId, superAdminId: req.superAdminId }
+        approvedBy: { userId: req.userId, memberId: req.memberId, adminId: req.adminId, superAdminId: req.superAdminId, esfUserId: req.esfUserId }
     });
     return res.status(200).json(new ApiResponse(200, { results }, 'Approved changes processed'));
 });

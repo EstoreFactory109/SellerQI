@@ -634,6 +634,26 @@ function getBlockedMessage(analysis) {
   return 'Unable to update this attribute due to catalog restrictions.';
 }
 
+/**
+ * The live listing for one SKU (a read), with what a change needs: the product type,
+ * the seller id and the signing context. Used to show "before" values and to check
+ * a change is still current just before it is sent.
+ */
+async function readLiveListing({ sku, userId, country, region }) {
+  const { refreshToken, sellerId } = await getRefreshTokenForSeller(userId, country, region);
+  const accessToken = await generateAccessToken(userId, refreshToken);
+  if (!accessToken) throw new ApiError(500, 'Failed to generate access token');
+  const { baseUri, marketplaceId, awsRegion } = getRegionConfig(region, country);
+  const credentials = await getTemporaryCredentials(awsRegion);
+  if (!credentials?.AccessKey) throw new ApiError(500, 'Failed to get AWS credentials');
+  const listing = await getListingItem(sellerId, sku, marketplaceId, baseUri, accessToken, credentials, awsRegion);
+  return {
+    listing,
+    productType: listing?.summaries?.[0]?.productType || null,
+    context: { sellerId, marketplaceId, baseUri, accessToken, credentials, awsRegion }
+  };
+}
+
 // ============================================================================
 // MAIN FUNCTIONS
 // ============================================================================
@@ -1406,6 +1426,12 @@ async function updateProductContent(params) {
 module.exports = {
   // Main functions
   updateProductContent,
+  readLiveListing,
+  // Building blocks for other listing changes (Services/Sp_API/ListingsWriteService.js)
+  getRegionConfig,
+  getRefreshTokenForSeller,
+  getListingItem,
+  patchListingItem,
   autoFixListing,
   autoFixCatalogConflicts,
   fixSingleAttribute,

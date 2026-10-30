@@ -27,12 +27,34 @@ const asyncHandler = require('../../utils/AsyncHandler.js');
 const logger = require('../../utils/Logger.js');
 const {
   updateProductContent,
-  autoFixCatalogConflicts,
   FIX_STATUS
 } = require('../../Services/Sp_API/UpdateProductContentService.js');
-const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
 
 const ALLOWED_UPDATE_TYPES = ['title', 'description', 'bulletpoints', 'generic_keyword'];
+
+/**
+ * Makes a listing change through the change-request log and answers with Amazon's
+ * result, as this endpoint always has (a refused change is still a 200 with the
+ * result's status; the page reads it).
+ */
+async function runLoggedChange(req, actionType, input) {
+  const ChangeRequestService = require('../../Services/Actions/ChangeRequestService.js');
+  const { approverOf } = require('../actions/AmazonActionsController.js');
+  let done;
+  try {
+    done = await ChangeRequestService.runApproved({
+      userId: req.userId, country: req.country, region: req.region,
+      feature: 'listings', actionType, input, source: 'screen', approvedBy: approverOf(req)
+    });
+  } catch (error) {
+    // Refused before sending (switched off, no SKU, ...): nothing changed on Amazon.
+    return { status: 'ERROR', message: error.message };
+  }
+  const ChangeRequest = require('../../models/MCP/AmazonChangeRequestModel.js');
+  const doc = await ChangeRequest.findById(done.id).select('response error status').lean();
+  if (doc?.response && typeof doc.response === 'object') return doc.response;
+  return { status: doc?.status === 'succeeded' ? FIX_STATUS.SUCCESS : 'ERROR', message: doc?.error || done.message };
+}
 
 function normalizeDataToBeUpdated(value) {
   if (value == null) return null;
@@ -62,9 +84,11 @@ const updateProductContentController = asyncHandler(async (req, res) => {
     brandName
   } = req.body;
 
-  const userId = req.userId || req.user?.id || req.body.userId;
-  const country = req.body.country ?? req.country;
-  const region = req.body.region ?? req.region;
+  // The account and marketplace come from the session only (auth + getLocation),
+  // never from the body.
+  const userId = req.userId;
+  const country = req.country;
+  const region = req.region;
 
   if (!sku || !country || !region) {
     return res.status(400).json(
@@ -81,13 +105,8 @@ const updateProductContentController = asyncHandler(async (req, res) => {
   let result;
 
   if (fixConflictsOnly) {
-    result = await autoFixCatalogConflicts({
-      sku,
-      userId,
-      country,
-      region,
-      sellerId: sellerId || undefined
-    });
+    // The seller's Fix button is the approval; the change is still logged.
+    result = await runLoggedChange(req, 'listings.fix_catalog_conflicts', { sku });
   } else {
     if (dataToBeUpdated == null || dataToBeUpdated === '') {
       return res.status(400).json(
@@ -118,47 +137,22 @@ const updateProductContentController = asyncHandler(async (req, res) => {
       );
     }
 
-    result = await updateProductContent({
-      sku,
-      userId,
-      country,
-      region,
-      sellerId: sellerId || undefined,
-      dataToBeUpdated: normalizedType,
-      valueToBeUpdated,
-      options: {
-        analyzeOnly,
-        autoFixConflicts,
-        ...(brandName != null && brandName !== '' && { brandName: String(brandName).trim() })
-      }
-    });
-
-    if (!analyzeOnly && result.status === FIX_STATUS.SUCCESS && result.asin) {
-      try {
-        await ListingFixStatus.markAsFixed({
-          userId,
-          country,
-          region,
-          asin: result.asin,
-          sku,
-          attribute: normalizedType,
-          valueApplied: valueToBeUpdated
-        });
-        logger.info('[UpdateProductContent] Marked listing fix status', {
-          userId,
-          country,
-          region,
-          asin: result.asin,
-          sku,
-          attribute: normalizedType
-        });
-      } catch (fixStatusErr) {
-        logger.warn('[UpdateProductContent] Failed to mark fix status (non-blocking)', {
-          error: fixStatusErr.message,
-          userId,
-          sku
-        });
-      }
+    if (analyzeOnly) {
+      // A read: nothing changes on Amazon.
+      result = await updateProductContent({
+        sku, userId, country, region,
+        sellerId: sellerId || undefined,
+        dataToBeUpdated: normalizedType,
+        valueToBeUpdated,
+        options: { analyzeOnly: true, autoFixConflicts }
+      });
+    } else {
+      // The seller's Apply button is the approval; the change is still logged
+      // (AmazonChangeRequest) and recorded as ours (ListingFixStatus, in the handler).
+      result = await runLoggedChange(req, 'listings.update_content', {
+        sku, field: normalizedType, value: valueToBeUpdated, autoFixConflicts,
+        ...(brandName != null && brandName !== '' ? { brandName: String(brandName).trim() } : {})
+      });
     }
   }
 

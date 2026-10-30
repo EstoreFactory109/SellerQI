@@ -47,6 +47,10 @@ const ESF_CLIENT_PAGES = [
 
     { key: 'ecommerce-calendar', label: 'Ecommerce Calendar', group: 'Tools' },
     { key: 'settings', label: 'Client Settings', group: 'Tools' },
+    // Not a page: permission to approve changes SellerQI makes on Amazon (Approve
+    // buttons, Fix It, the PPC page's pause/negative buttons). Viewing a page and
+    // changing the account are separate decisions.
+    { key: 'amazon-changes', label: 'Make changes on Amazon', group: 'Tools' },
 ];
 
 const ESF_PAGE_KEYS = ESF_CLIENT_PAGES.map((p) => p.key);
@@ -119,6 +123,13 @@ const API_PATH_TO_PAGE = [
     ['/api/pagewise/tasks', 'tasks'],
 
     ['/api/qmate', 'qmate'],
+
+    // Changes on Amazon (api/app.js mounts both behind the guards). Preparing a change
+    // needs the page it is made from; sending it needs "amazon-changes".
+    ['/api/actions/ads', 'ppc-dashboard'],
+    [/^\/api\/actions\/[^/]+\/(?:[0-9a-fA-F]{24}\/approve|approve-many)(?:[/?]|$)/, 'amazon-changes'],
+    [/^\/api\/pagewise\/tasks\/approve-actions(?:[/?]|$)/, 'amazon-changes'],
+    ['/api/listings', 'amazon-changes'],
 ];
 
 /**
@@ -134,7 +145,7 @@ const API_PATH_TO_PAGE = [
  * Recorded in the test so the distinction cannot be quietly lost.
  */
 const PAGES_WITHOUT_GUARDED_API = {
-    'pre-analysis': 'Listing Analyzer posts to /api/listings, outside the guarded prefixes.',
+    'pre-analysis': 'Listing Analyzer has no endpoint of its own; its Fix It writes go to /api/listings, guarded as amazon-changes.',
     'user-logging': 'Super-admin only; never offered in the member catalogue.',
     'ecommerce-calendar': 'Static reference data held in the client bundle.',
     settings: 'Account settings are served from the shared /app routes, not /api/pagewise.',

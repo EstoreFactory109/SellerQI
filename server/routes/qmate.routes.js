@@ -13,15 +13,18 @@ const {
 } = require('../controllers/ai/QMateController.js');
 const {
     generateSuggestion,
-    applyFix,
     batchSuggestions,
-    lookupSku,
-    pauseKeywordAction,
-    addToNegativeAction,
-    pauseAndAddToNegativeAction,
-    bulkPauseAction,
-    bulkPauseAndAddToNegativeAction
+    lookupSku
 } = require('../controllers/ai/QMateActionController.js');
+
+// QMate used to change Amazon straight from a chat reply, without the seller
+// approving the exact change. Its changes now go through /api/actions (preview,
+// then the seller's approval); these old endpoints say so.
+const gone = (req, res) => res.status(410).json({
+  statusCode: 410,
+  data: null,
+  message: 'Changes from QMate now need your approval: use "Review and send" on the suggestion.'
+});
 
 // QMate AI chat endpoint (requires location for analytics context)
 router.post('/chat', auth, getLocation, validateChatBody, handleChat);
@@ -30,7 +33,7 @@ router.post('/chat', auth, getLocation, validateChatBody, handleChat);
 // Generate AI content suggestions for title, bullet points, description, backend keywords
 router.post('/generate-suggestion', auth, getLocation, generateSuggestion);
 // Apply a content fix to Amazon listing
-router.post('/apply-fix', auth, getLocation, applyFix);
+router.post('/apply-fix', auth, gone);
 // Generate suggestions for multiple attributes at once
 router.post('/batch-suggestions', auth, getLocation, batchSuggestions);
 // Look up SKU for an ASIN (used when content_actions has null SKU)
@@ -38,12 +41,12 @@ router.get('/lookup-sku/:asin', auth, getLocation, lookupSku);
 
 // PPC Keyword Actions (for QMate wasted spend keyword management)
 // Single keyword actions
-router.post('/ppc/pause-keyword', auth, getLocation, pauseKeywordAction);
-router.post('/ppc/add-to-negative', auth, getLocation, addToNegativeAction);
-router.post('/ppc/pause-and-add-to-negative', auth, getLocation, pauseAndAddToNegativeAction);
+router.post('/ppc/pause-keyword', auth, gone);
+router.post('/ppc/add-to-negative', auth, gone);
+router.post('/ppc/pause-and-add-to-negative', auth, gone);
 // Bulk actions (max 10 keywords)
-router.post('/ppc/bulk-pause', auth, getLocation, bulkPauseAction);
-router.post('/ppc/bulk-pause-and-add-to-negative', auth, getLocation, bulkPauseAndAddToNegativeAction);
+router.post('/ppc/bulk-pause', auth, gone);
+router.post('/ppc/bulk-pause-and-add-to-negative', auth, gone);
 
 // Chat history CRUD (auth only)
 router.get('/chats', auth, listChats);

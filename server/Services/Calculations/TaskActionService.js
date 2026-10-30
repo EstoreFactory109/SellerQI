@@ -37,7 +37,7 @@ const MAX_ACTIONS_PER_REQUEST = 25;
 // target, not a negative keyword; not offered yet.
 const isAsin = (text) => /^b0[0-9a-z]{8}$/i.test(String(text || '').trim());
 
-const actionsDisabled = () => String(process.env.TASK_ACTIONS_DISABLED || '').toLowerCase() === 'true';
+const actionsDisabled = () => require('../Actions/actionGates.js').writesDisabled();
 
 /**
  * Pure: the change a task proposes, or null. `payload` is what is sent to Amazon.
@@ -189,121 +189,26 @@ function proposedActionFor(task) {
     return null;
 }
 
-/** Amazon v3 answers a create with { <entity>: { success: [], error: [] } }. */
-function v3Errors(result) {
-    const errors = [];
-    for (const value of Object.values(result || {})) {
-        if (value && Array.isArray(value.error)) errors.push(...value.error);
-    }
-    return errors;
-}
+const { v3Errors } = require('../Actions/adsErrors.js');
 
-/** Sends one approved change to Amazon. Throws on any failure. */
-/** Listing fix: the seller's text, sent through the same service as Fix It, and recorded the same way. */
-async function executeListingFix(action, { userId, country, region }) {
-    const Seller = require('../../models/user-auth/sellerCentralModel.js');
-    const seller = await Seller.findOne({ User: userId }).select('sellerAccount.country sellerAccount.region sellerAccount.products.asin sellerAccount.products.sku sellerAccount.products.status').lean();
-    const account = (seller?.sellerAccount || []).find(a => a.country === country && a.region === region);
-    const product = (account?.products || []).find(p => p.asin === action.payload.asin && p.status === 'Active' && p.sku)
-        || (account?.products || []).find(p => p.asin === action.payload.asin && p.sku);
-    if (!product) throw new Error('No SKU found for this product, so the listing cannot be updated.');
+// Task action type -> the change handler that makes it (Services/Actions/handlers),
+// and how the task's payload maps to that handler's input.
+const TASK_ACTION_HANDLERS = {
+    add_negative_keyword: ['ads.add_negative_keywords', (p) => ({ level: p.level, keywords: [p.keyword] })],
+    pause_keyword: ['ads.pause_keywords', (p) => ({ keywordIds: [String(p.keywordId)], adType: p.adType || 'SP' })],
+    lower_bids: ['ads.lower_bids', (p) => p],
+    raise_budget: ['ads.raise_budget', (p) => p],
+    pause_product_ads: ['ads.pause_product_ads', (p) => p],
+    update_listing_content: ['listings.update_content', (p) => ({ asin: p.asin, field: p.field, value: p.value })],
+    request_feedback_update: ['messaging.request_feedback', (p) => p]
+};
 
-    const { updateProductContent, FIX_STATUS } = require('../Sp_API/UpdateProductContentService.js');
-    const result = await updateProductContent({
-        sku: product.sku, userId, country, region,
-        dataToBeUpdated: action.payload.field, valueToBeUpdated: action.payload.value
-    });
-    const accepted = [FIX_STATUS.SUCCESS, FIX_STATUS.PARTIAL_SUCCESS, FIX_STATUS.CONFLICT_RESOLVED].includes(result?.status);
-    if (!accepted) throw Object.assign(new Error(result?.message || 'Amazon did not accept the change.'), { response: result });
-
-    // The record Fix It keeps too: "changed by us" for the detail-page-change check.
-    const ListingFixStatus = require('../../models/system/ListingFixStatusModel.js');
-    await ListingFixStatus.markAsFixed({
-        userId, country, region, asin: action.payload.asin, sku: product.sku,
-        attribute: action.payload.field, valueApplied: action.payload.value
-    }).catch(() => null);
-    return { status: result.status, sku: product.sku, message: result.message };
-}
-
+/** Sends one approved change to Amazon through its handler. Throws on any failure. */
 async function execute(action, { userId, country, region }) {
-    if (action.type === 'update_listing_content') return executeListingFix(action, { userId, country, region });
-    if (action.type === 'request_feedback_update') {
-        const { requestFeedbackUpdate } = require('../Sp_API/FeedbackRequest.js');
-        return requestFeedbackUpdate({ userId, country, region, orderId: action.payload.orderId });
-    }
-    const { resolveAdsCredentials } = require('../AmazonAds/resolveAdsCredentials.js');
-    const clientId = process.env.AMAZON_ADS_CLIENT_ID;
-    if (!clientId) throw new Error('AMAZON_ADS_CLIENT_ID is not set');
-    const { accessToken, profileId, region: adsRegion } = await resolveAdsCredentials(userId, country, region);
-
-    if (action.type === 'add_negative_keyword') {
-        const { addToNegative, getConfig } = require('../AmazonAds/addToNegetive.js');
-        const config = getConfig({ accessToken, profileId, region: adsRegion, clientId });
-        const result = await addToNegative(config, [action.payload.keyword], { level: action.payload.level });
-        const errors = v3Errors(result);
-        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected it: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: result });
-        return result;
-    }
-    if (action.type === 'lower_bids') {
-        // Only keywords whose bid is still what the proposal saw: a bid the seller
-        // changed since is theirs to keep.
-        const keywordBids = action.payload.bids.filter(b => b.kind !== 'target');
-        const targetBids = action.payload.bids.filter(b => b.kind === 'target');
-        const unchanged = (current, id, expected) => Math.abs((current.get(id) ?? NaN) - expected) < 0.005;
-        // Keywords: the daily keyword snapshot (checked against live Amazon, 150/150 equal).
-        const { loadKeywordSnapshot } = require('../../utils/ppcSnapshotLoader.js');
-        const snapshot = keywordBids.length ? await loadKeywordSnapshot(String(userId), country, region).catch(() => null) : null;
-        const kwCurrent = new Map((snapshot?.keywordData || []).map(k => [String(k.keywordId), Number(k.bid)]));
-        const kwSend = keywordBids.filter(b => unchanged(kwCurrent, b.keywordId, b.expectedCurrentBid));
-        // Targets: their snapshot is weekly, so the current bid is read live (a read).
-        const { listTargetBids, updateTargetBids } = require('../AmazonAds/AdsTargets.js');
-        const live = targetBids.length ? await listTargetBids(accessToken, profileId, adsRegion, targetBids.map(b => b.targetId)) : new Map();
-        const tgCurrent = new Map([...live].map(([id, t]) => [id, t.bid]));
-        const tgSend = targetBids.filter(b => unchanged(tgCurrent, b.targetId, b.expectedCurrentBid));
-        if (kwSend.length + tgSend.length === 0) throw new Error('These bids have changed since the suggestion was made, so nothing was sent. Refresh to see a new suggestion.');
-
-        const responses = {};
-        if (kwSend.length) {
-            const { updateKeywordBids } = require('../AmazonAds/Pause-ArchiveKeywords.js');
-            responses.keywords = await updateKeywordBids({ bids: kwSend.map(({ keywordId, bid }) => ({ keywordId, bid })), accessToken, profileId, region: adsRegion, clientId });
-        }
-        if (tgSend.length) {
-            responses.targets = await updateTargetBids({ bids: tgSend.map(({ targetId, bid }) => ({ targetId, bid })), accessToken, profileId, region: adsRegion });
-        }
-        const errors = [...v3Errors(responses.keywords), ...v3Errors(responses.targets)];
-        const sent = kwSend.length + tgSend.length;
-        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected ${errors.length} of ${sent}: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: responses });
-        return { ...responses, sent, skippedChanged: action.payload.bids.length - sent };
-    }
-    if (action.type === 'raise_budget') {
-        const { listCampaignBudgets, updateCampaignBudget } = require('../AmazonAds/AdsTargets.js');
-        const [live] = await listCampaignBudgets(accessToken, profileId, adsRegion, [action.payload.campaignId]);
-        if (!live) throw new Error('This campaign is no longer enabled, so its budget was not changed.');
-        if (Math.abs(Number(live.budget) - action.payload.expectedCurrentBudget) >= 0.005) {
-            throw new Error(`This campaign's budget is now $${Number(live.budget).toFixed(2)}, changed since the suggestion, so nothing was sent.`);
-        }
-        const result = await updateCampaignBudget({ campaignId: action.payload.campaignId, budget: action.payload.budget, accessToken, profileId, region: adsRegion });
-        const errors = v3Errors(result);
-        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected it: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: result });
-        return result;
-    }
-    if (action.type === 'pause_product_ads') {
-        const { listEnabledProductAdsForAsin, pauseProductAds } = require('../AmazonAds/ProductAds.js');
-        const ads = await listEnabledProductAdsForAsin({ asin: action.payload.asin, accessToken, profileId, region: adsRegion });
-        if (ads.length === 0) throw new Error('This product has no enabled Sponsored Products ads now, so nothing was paused.');
-        const result = await pauseProductAds({ adIds: ads.map(a => a.adId), accessToken, profileId, region: adsRegion });
-        const errors = v3Errors(result);
-        if (errors.length > 0) throw Object.assign(new Error(`Amazon rejected ${errors.length} of ${ads.length}: ${JSON.stringify(errors[0]).slice(0, 300)}`), { response: result });
-        return { ...result, paused: ads.length, adIds: ads.map(a => String(a.adId)) };
-    }
-    if (action.type === 'pause_keyword') {
-        const { pauseKeywords } = require('../AmazonAds/Pause-ArchiveKeywords.js');
-        const result = await pauseKeywords({ ...action.payload, accessToken, profileId, region: adsRegion, clientId });
-        const failed = Object.values(result || {}).find((v) => v && v.success === false);
-        if (failed) throw Object.assign(new Error(failed.error || 'Amazon did not pause the keyword'), { response: result });
-        return result;
-    }
-    throw new Error(`Unknown action ${action.type}`);
+    const entry = TASK_ACTION_HANDLERS[action.type];
+    if (!entry) throw new Error(`Unknown action ${action.type}`);
+    const handler = require('../Actions/registry.js').get(entry[0]);
+    return handler.execute(entry[1](action.payload), { userId, country, region });
 }
 
 /**
@@ -356,7 +261,8 @@ async function approveTaskActions({ userId, country, region, taskIds = [], appro
                 userId: approvedBy.userId ? String(approvedBy.userId) : null,
                 memberId: approvedBy.memberId ? String(approvedBy.memberId) : null,
                 adminId: approvedBy.adminId ? String(approvedBy.adminId) : null,
-                superAdminId: approvedBy.superAdminId ? String(approvedBy.superAdminId) : null
+                superAdminId: approvedBy.superAdminId ? String(approvedBy.superAdminId) : null,
+                esfUserId: approvedBy.esfUserId ? String(approvedBy.esfUserId) : null
             }
         });
         try {
@@ -401,6 +307,8 @@ async function annotateProposedActions(userId, tasks = []) {
 
 module.exports = {
     MAX_ACTIONS_PER_REQUEST,
+    TASK_ACTION_HANDLERS,
+    v3Errors,
     proposedActionFor,
     validateListingContent,
     approveTaskActions,

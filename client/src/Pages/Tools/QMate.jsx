@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import ClarificationCard from './QMate/ClarificationCard';
 import FollowUpChips from './QMate/FollowUpChips';
+import { useChangeRequest } from '../../Components/Actions/ChangeRequestModal.jsx';
 
 const TYPING_SPEED_MS = 12;
 const TYPING_CHUNK = 2;
@@ -146,7 +147,9 @@ function ContentSuggestionsPanel({
         valueToApply = suggestions;
       }
       
-      await onApply(asin, sku, type, valueToApply);
+      // false: the seller closed the approval window, so nothing changed.
+      const applied = await onApply(asin, sku, type, valueToApply);
+      if (applied === false) return;
       onApplySuccess?.(messageId, asin, type);
     } catch (err) {
       setApplyError(err.message || 'Failed to apply changes');
@@ -311,6 +314,14 @@ const MAX_QMATE_BULK_KEYWORDS = 10;
  * Allows pause, add to negative, or both - individually or in bulk
  */
 function WastedKeywordsPanel({ keywords, totalCount, currentOffset = 0, onActionComplete, onLoadMore }) {
+  // Every change on Amazon from QMate is previewed and approved first.
+  const { requestChange, changeModal } = useChangeRequest();
+  const runChange = async (actionType, input, fallback) => {
+    const outcome = await requestChange({ feature: 'ads', actionType, input, source: 'qmate' });
+    if (outcome?.status === 'closed' || outcome?.status === 'cancelled') return false;
+    if (outcome?.status !== 'succeeded') throw new Error(outcome?.message || fallback);
+    return true;
+  };
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [loadingAction, setLoadingAction] = useState(null);
   const [actionResults, setActionResults] = useState({});
@@ -335,10 +346,7 @@ function WastedKeywordsPanel({ keywords, totalCount, currentOffset = 0, onAction
     setLoadingAction({ type: 'pause', key });
     setError(null);
     try {
-      await axiosInstance.post('/api/qmate/ppc/pause-keyword', {
-        keywordId: String(kw.keywordId),
-        adType: 'SP',
-      });
+      if (!(await runChange('ads.pause_keywords', { keywordIds: [String(kw.keywordId)], adType: 'SP' }, 'Failed to pause keyword'))) return;
       setActionResults((prev) => ({ ...prev, [key]: 'paused' }));
       onActionComplete?.();
     } catch (err) {
@@ -355,12 +363,10 @@ function WastedKeywordsPanel({ keywords, totalCount, currentOffset = 0, onAction
     setError(null);
     try {
       const matchType = (kw.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
-      await axiosInstance.post('/api/qmate/ppc/add-to-negative', {
-        campaignId: String(kw.campaignId),
-        adGroupId: String(kw.adGroupId),
-        keywordText: kw.keyword || kw.keywordText,
-        matchType,
-      });
+      if (!(await runChange('ads.add_negative_keywords', {
+        keywords: [{ campaignId: String(kw.campaignId), adGroupId: String(kw.adGroupId), keywordText: kw.keyword || kw.keywordText, matchType, campaignName: kw.campaignName, adGroupName: kw.adGroupName }],
+        level: 'adGroup',
+      }, 'Failed to add to negative'))) return;
       setActionResults((prev) => ({ ...prev, [key]: 'negative' }));
       onActionComplete?.();
     } catch (err) {
@@ -377,14 +383,10 @@ function WastedKeywordsPanel({ keywords, totalCount, currentOffset = 0, onAction
     setError(null);
     try {
       const matchType = (kw.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
-      await axiosInstance.post('/api/qmate/ppc/pause-and-add-to-negative', {
-        keywordId: String(kw.keywordId),
-        campaignId: String(kw.campaignId),
-        adGroupId: String(kw.adGroupId),
-        keywordText: kw.keyword || kw.keywordText,
-        matchType,
+      if (!(await runChange('ads.pause_and_negate', {
+        items: [{ keywordId: String(kw.keywordId), campaignId: String(kw.campaignId), adGroupId: String(kw.adGroupId), keywordText: kw.keyword || kw.keywordText, matchType, campaignName: kw.campaignName }],
         adType: 'SP',
-      });
+      }, 'Failed to pause and add to negative'))) return;
       setActionResults((prev) => ({ ...prev, [key]: 'pausedAndNegative' }));
       onActionComplete?.();
     } catch (err) {
@@ -400,10 +402,7 @@ function WastedKeywordsPanel({ keywords, totalCount, currentOffset = 0, onAction
     setLoadingAction({ type: 'bulkPause' });
     setError(null);
     try {
-      await axiosInstance.post('/api/qmate/ppc/bulk-pause', {
-        keywordIds: toPause.map((kw) => String(kw.keywordId)),
-        adType: 'SP',
-      });
+      if (!(await runChange('ads.pause_keywords', { keywordIds: toPause.map((kw) => String(kw.keywordId)), adType: 'SP' }, 'Failed to pause keywords'))) return;
       const newResults = {};
       toPause.forEach((kw) => { newResults[getRowKey(kw)] = 'paused'; });
       setActionResults((prev) => ({ ...prev, ...newResults }));
@@ -422,16 +421,17 @@ function WastedKeywordsPanel({ keywords, totalCount, currentOffset = 0, onAction
     setLoadingAction({ type: 'bulkPauseAndAdd' });
     setError(null);
     try {
-      await axiosInstance.post('/api/qmate/ppc/bulk-pause-and-add-to-negative', {
-        keywords: toProcess.map((kw) => ({
+      if (!(await runChange('ads.pause_and_negate', {
+        items: toProcess.map((kw) => ({
           keywordId: String(kw.keywordId),
           campaignId: String(kw.campaignId),
           adGroupId: String(kw.adGroupId),
           keywordText: kw.keyword || kw.keywordText,
           matchType: (kw.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase',
+          campaignName: kw.campaignName,
         })),
         adType: 'SP',
-      });
+      }, 'Failed to pause and add to negative'))) return;
       const newResults = {};
       toProcess.forEach((kw) => { newResults[getRowKey(kw)] = 'pausedAndNegative'; });
       setActionResults((prev) => ({ ...prev, ...newResults }));
@@ -450,6 +450,7 @@ function WastedKeywordsPanel({ keywords, totalCount, currentOffset = 0, onAction
 
   return (
     <div className="mt-4 bg-[#161b22] border border-[#30363d] rounded-xl p-4">
+      {changeModal}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-amber-400 text-lg">⚠️</span>
@@ -787,6 +788,8 @@ const QMate = () => {
   const [actionLoading, setActionLoading] = useState(false);
   /** Tracks which suggestion panels have had fix applied (messageId-asin-type) so Apply stays disabled */
   const [appliedFixKeys, setAppliedFixKeys] = useState(() => new Set());
+  // Listing fixes QMate suggests are previewed and approved before anything is sent.
+  const { requestChange, changeModal } = useChangeRequest();
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -986,14 +989,15 @@ const QMate = () => {
         return null;
       }
       
-      const response = await axiosInstance.post('/api/qmate/apply-fix', {
-        asin,
-        sku: resolvedSku,
-        attribute,
-        value
+      const outcome = await requestChange({
+        feature: 'listings',
+        actionType: 'listings.update_content',
+        input: { asin, sku: resolvedSku, field: attribute, value },
+        source: 'qmate'
       });
-      console.log('[QMate] Applied fix:', response.data);
-      return response.data?.data;
+      if (outcome?.status === 'closed' || outcome?.status === 'cancelled') return false;
+      if (outcome?.status !== 'succeeded') throw new Error(outcome?.message || 'Amazon did not accept the change.');
+      return outcome;
     } catch (error) {
       console.error('[QMate] Failed to apply fix:', error);
       throw error;
@@ -1160,19 +1164,9 @@ const QMate = () => {
             } catch (suggestionError) {
               console.error('[QMate] Failed to generate suggestion:', suggestionError);
             }
-          } else if (action.action === 'apply_fix') {
-            try {
-              const applyResponse = await axiosInstance.post('/api/qmate/apply-fix', {
-                asin: action.asin,
-                sku: action.sku,
-                attribute: action.attribute,
-                value: action.suggested_value
-              });
-              console.log('[QMate] Applied fix:', applyResponse.data);
-            } catch (applyError) {
-              console.error('[QMate] Failed to apply fix:', applyError);
-            }
           }
+          // apply_fix is never run from a reply: the suggestion panel's Apply opens
+          // the approval window, and only the seller's approval sends it.
         }
       }
 
@@ -1235,6 +1229,7 @@ const QMate = () => {
 
   return (
     <div className="flex h-full min-h-0 bg-[#0f0f0f] text-gray-100 overflow-hidden">
+      {changeModal}
       {/* Sidebar - Chat History */}
       <aside className="w-64 bg-[#161b22] border-r border-[#30363d] flex flex-col flex-shrink-0">
         {/* QMate title */}

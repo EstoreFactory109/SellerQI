@@ -72,6 +72,7 @@ const gmailRoute=require('../routes/gmail.routes.js')
 const gdriveRoute=require('../routes/gdrive.routes.js')
 const alertsRoute=require('../routes/alerts.routes.js')
 const qmateRoute=require('../routes/qmate.routes.js')
+const amazonActionsRoute=require('../routes/amazonActions.routes.js')
 const whatsappRoute=require('../routes/whatsapp.routes.js')
 const reviewRoute=require('../routes/review.routes.js')
 const rankingContentAIRoute=require('../routes/rankingContentAI.routes.js')
@@ -225,7 +226,8 @@ if (testRoutesEnabled) {
 } else {
     logger.info('Test routes are disabled (production-safe). Set ENABLE_TEST_ROUTES=true to enable.');
 }
-app.use('/api/listings',updateProductContentRoute)
+app.use('/api/listings',esfPageGuard,memberPageGuard,updateProductContentRoute)
+app.use('/api/actions',esfPageGuard,memberPageGuard,amazonActionsRoute)
 app.use('/api/cogs',cogsRoute)
 app.use('/api/removal-receipts',removalReceiptsRoute)
 app.use('/api/authorized-resellers',authorizedResellersRoute)

@@ -89,7 +89,9 @@ const BulkApproveModal = ({ tasks, onClose, onApproved }) => {
         <div className="px-6 pt-3 pb-6">
           {!done && (
             <p className="m-0 text-xs" style={{ color: COLORS.textSecondary }}>
-              These change your Amazon Ads account. Nothing is sent until you approve, and every change is recorded with who approved it.
+              {tasks.some((t) => t.proposedAction?.type === 'request_feedback_update')
+                ? 'These change your Amazon Ads account or message buyers through Amazon.'
+                : 'These change your Amazon Ads account.'}{' '}Nothing is sent until you approve, and every change is recorded with who approved it.
             </p>
           )}
           {error && <p role="alert" className="m-0 mt-3 text-sm" style={{ color: COLORS.fix }}>{error}</p>}

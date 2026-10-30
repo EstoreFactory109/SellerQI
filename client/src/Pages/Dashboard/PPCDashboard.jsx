@@ -69,6 +69,7 @@ import { PageSkeleton, CampaignAnalysisSkeleton } from '../../Components/Skeleto
 import { SkeletonBar } from '../../Components/Skeleton/Skeleton.jsx';
 import axiosInstance from '../../config/axios.config.js';
 import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
+import { useChangeRequest } from '../../Components/Actions/ChangeRequestModal.jsx';
 
 // Helper function to get actual end date (yesterday due to 24-hour data delay)
 const getActualEndDate = () => {
@@ -240,6 +241,13 @@ const PPCDashboard = () => {
   const itemsPerPage = 10;
   
   const dispatch = useDispatch();
+  // Every change on Amazon from this page is previewed and approved first.
+  const { requestChange, changeModal } = useChangeRequest();
+  // The seller closed the approval window: no change, no message.
+  const notApproved = (outcome) => outcome?.status === 'closed' || outcome?.status === 'cancelled';
+  const approvedOrThrow = (outcome, fallback) => {
+    if (outcome?.status !== 'succeeded') throw new Error(outcome?.message || fallback);
+  };
   
   // Infinite-scroll sentinels (one per tab table)
   const highAcosSentinelRef = useRef(null);
@@ -446,10 +454,9 @@ const PPCDashboard = () => {
     if (id == null || id === '') return;
     setPausingKeywordId(id);
     try {
-      await axiosInstance.post('/api/pagewise/ads/pause-keyword', {
-        keywordId: String(id),
-        adType: 'SP',
-      });
+      const outcome = await requestChange({ feature: 'ads', actionType: 'ads.pause_keywords', input: { keywordIds: [String(id)], adType: 'SP' } });
+      if (notApproved(outcome)) return;
+      approvedOrThrow(outcome, 'Failed to pause keyword');
       dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: 'Keyword paused successfully.' });
@@ -468,15 +475,16 @@ const PPCDashboard = () => {
     setAddingToNegativeKeywordId(id);
     const matchType = (keyword.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
     try {
-      await axiosInstance.post('/api/pagewise/ads/add-to-negative', {
-        keywords: [{
-          campaignId: String(keyword.campaignId),
-          adGroupId: String(keyword.adGroupId),
-          keywordText: keyword.keyword,
-          matchType,
-        }],
-        level: 'adGroup',
+      const outcome = await requestChange({
+        feature: 'ads',
+        actionType: 'ads.add_negative_keywords',
+        input: {
+          keywords: [{ campaignId: String(keyword.campaignId), adGroupId: String(keyword.adGroupId), keywordText: keyword.keyword, matchType, campaignName: keyword.campaignName, adGroupName: keyword.adGroupName }],
+          level: 'adGroup',
+        },
       });
+      if (notApproved(outcome)) return;
+      approvedOrThrow(outcome, 'Failed to add keyword to negative.');
       dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: 'Keyword added to negative keywords successfully.' });
@@ -494,14 +502,16 @@ const PPCDashboard = () => {
     setPausingAndAddingKeywordId(keyword.keywordId);
     const matchType = (keyword.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase';
     try {
-      await axiosInstance.post('/api/pagewise/ads/pause-and-add-to-negative', {
-        keywordId: String(keyword.keywordId),
-        campaignId: String(keyword.campaignId),
-        adGroupId: String(keyword.adGroupId),
-        keywordText: keyword.keyword,
-        matchType,
-        adType: 'SP',
+      const outcome = await requestChange({
+        feature: 'ads',
+        actionType: 'ads.pause_and_negate',
+        input: {
+          items: [{ keywordId: String(keyword.keywordId), campaignId: String(keyword.campaignId), adGroupId: String(keyword.adGroupId), keywordText: keyword.keyword, matchType, campaignName: keyword.campaignName }],
+          adType: 'SP',
+        },
       });
+      if (notApproved(outcome)) return;
+      approvedOrThrow(outcome, 'Failed to pause and add to negative.');
       dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       setFeedbackPopup({ show: true, type: 'success', message: 'Keyword paused and added to negative successfully.' });
@@ -522,10 +532,9 @@ const PPCDashboard = () => {
     }
     setBulkWastedLoading('pause');
     try {
-      await axiosInstance.post('/api/pagewise/ads/pause-keywords', {
-        keywordIds: toPause.map((r) => String(r.keywordId)),
-        adType: 'SP',
-      });
+      const outcome = await requestChange({ feature: 'ads', actionType: 'ads.pause_keywords', input: { keywordIds: toPause.map((r) => String(r.keywordId)), adType: 'SP' }, source: 'bulk' });
+      if (notApproved(outcome)) return;
+      approvedOrThrow(outcome, 'Failed to pause keywords.');
       setSelectedWastedKeys([]);
       dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
@@ -546,15 +555,24 @@ const PPCDashboard = () => {
     }
     setBulkWastedLoading('addToNegative');
     try {
-      await axiosInstance.post('/api/pagewise/ads/add-to-negative', {
-        keywords: toAdd.map((r) => ({
-          campaignId: String(r.campaignId),
-          adGroupId: String(r.adGroupId),
-          keywordText: r.keyword,
-          matchType: (r.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase',
-        })),
-        level: 'adGroup',
+      const outcome = await requestChange({
+        feature: 'ads',
+        actionType: 'ads.add_negative_keywords',
+        input: {
+          keywords: toAdd.map((r) => ({
+            campaignId: String(r.campaignId),
+            adGroupId: String(r.adGroupId),
+            keywordText: r.keyword,
+            matchType: (r.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase',
+            campaignName: r.campaignName,
+            adGroupName: r.adGroupName,
+          })),
+          level: 'adGroup',
+        },
+        source: 'bulk',
       });
+      if (notApproved(outcome)) return;
+      approvedOrThrow(outcome, 'Failed to add keywords to negative.');
       setSelectedWastedKeys([]);
       dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
@@ -582,16 +600,24 @@ const PPCDashboard = () => {
     }
     setBulkWastedLoading('pauseAndAdd');
     try {
-      await axiosInstance.post('/api/pagewise/ads/pause-and-add-to-negative-bulk', {
-        keywords: toProcess.map((r) => ({
-          keywordId: String(r.keywordId),
-          campaignId: String(r.campaignId),
-          adGroupId: String(r.adGroupId),
-          keywordText: r.keyword,
-          matchType: (r.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase',
-        })),
-        adType: 'SP',
+      const outcome = await requestChange({
+        feature: 'ads',
+        actionType: 'ads.pause_and_negate',
+        input: {
+          items: toProcess.map((r) => ({
+            keywordId: String(r.keywordId),
+            campaignId: String(r.campaignId),
+            adGroupId: String(r.adGroupId),
+            keywordText: r.keyword,
+            matchType: (r.matchType || '').toUpperCase() === 'EXACT' ? 'negativeExact' : 'negativePhrase',
+            campaignName: r.campaignName,
+          })),
+          adType: 'SP',
+        },
+        source: 'bulk',
       });
+      if (notApproved(outcome)) return;
+      approvedOrThrow(outcome, 'Failed to pause and add to negative.');
       setSelectedWastedKeys([]);
       dispatch(fetchWastedSpendKeywords({ page: wastedSpendPagination?.page || wastedSpendPage, limit: itemsPerPage, startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
       dispatch(fetchPPCTabCounts({ startDate: info?.startDate || undefined, endDate: info?.endDate || undefined }));
@@ -2955,6 +2981,7 @@ const PPCDashboard = () => {
 
       {/* Success / Error feedback popup for pause keyword */}
       <AnimatePresence>
+        {changeModal}
         {feedbackPopup.show && (
           <motion.div
             initial={{ opacity: 0, y: -12 }}

@@ -9,6 +9,7 @@ const auth=asyncHandler(async(req,res,next)=>{
     const accesstoken=req.cookies.IBEXAccessToken;
     const adminToken=req.cookies.AdminToken;
     const superAdminToken=req.cookies.SuperAdminToken;
+    const esfToken=req.cookies.ESFToken;
     
     
     
@@ -47,6 +48,14 @@ const auth=asyncHandler(async(req,res,next)=>{
     }else{
         req.isSuperAdminSession=false;
         req.superAdminId=null;
+    }
+
+    // ESF staff working inside a client's account: recorded on every change they
+    // approve (a stale or invalid cookie just records nothing).
+    req.esfUserId=null;
+    if(esfToken && esfToken.length!==0){
+        const decodedEsf=await verifyAccessToken(esfToken);
+        if(decodedEsf && decodedEsf.isvalid) req.esfUserId=decodedEsf.tokenData;
     }
 
     if(decoded.isvalid){

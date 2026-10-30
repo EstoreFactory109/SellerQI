@@ -116,9 +116,6 @@ const { zohoUpload, MAX_FILES, MAX_FILE_BYTES } = require('../middlewares/multer
 const { ApiResponse } = require('../utils/ApiResponse.js');
 const esfClientOnly = require('../middlewares/Auth/esfClientOnly.js');
 
-const { pauseKeyword, pauseKeywordsBulk } = require('../controllers/analytics/PauseKeywordController.js');
-const { addToNegativeKeywords } = require('../controllers/analytics/AddToNegativeController.js');
-const { pauseAndAddToNegative, pauseAndAddToNegativeBulk } = require('../controllers/analytics/PauseAndAddToNegativeController.js');
 
 const {
     getIssuesSummary,
@@ -285,23 +282,19 @@ router.get('/ppc/auto-insights', auth, getLocation, analyseDataCache(600, 'ppc-a
 // Cache TTL: 10 minutes
 router.get('/ppc/asin-daily', auth, getLocation, analyseDataCache(600, 'ppc-asin-daily'), getAsinDailyAggregation);
 
-// Pause keyword (used by Wasted Spend Keywords table)
-// POST body: { keywordId: string, adType?: "SP" | "SB" | "SD" }
-router.post('/ads/pause-keyword', auth, getLocation, pauseKeyword);
-
-// Add keywords to negative (ad-group or campaign level)
-// POST body: { keywords: [{ campaignId, adGroupId?, keywordText, matchType? }], level?: 'adGroup' | 'campaign', matchType?: 'negativeExact' | 'negativePhrase' }
-router.post('/ads/add-to-negative', auth, getLocation, addToNegativeKeywords);
-
-// Pause keyword then add to negative (synchronous: pause first, then add-to-negative)
-// POST body: { keywordId, campaignId, adGroupId, keywordText, matchType?, adType? }
-router.post('/ads/pause-and-add-to-negative', auth, getLocation, pauseAndAddToNegative);
-
-// Bulk: pause multiple keywords. POST body: { keywordIds: string[], adType?: 'SP' | 'SB' | 'SD' }
-router.post('/ads/pause-keywords', auth, getLocation, pauseKeywordsBulk);
-
-// Bulk: pause then add to negative for multiple keywords. POST body: { keywords: [{ keywordId, campaignId, adGroupId, keywordText, matchType? }], adType? }
-router.post('/ads/pause-and-add-to-negative-bulk', auth, getLocation, pauseAndAddToNegativeBulk);
+// The PPC page's pause / negative buttons used to change Amazon Ads straight from
+// these endpoints, with no preview or record. They now go through /api/actions/ads
+// (previewed, approved, logged); these paths say so.
+const adsWritesMoved = (req, res) => res.status(410).json({
+    statusCode: 410,
+    data: null,
+    message: 'Changes on Amazon Ads now need your approval: reload the page and use the buttons again.'
+});
+router.post('/ads/pause-keyword', auth, adsWritesMoved);
+router.post('/ads/add-to-negative', auth, adsWritesMoved);
+router.post('/ads/pause-and-add-to-negative', auth, adsWritesMoved);
+router.post('/ads/pause-keywords', auth, adsWritesMoved);
+router.post('/ads/pause-and-add-to-negative-bulk', auth, adsWritesMoved);
 
 // ===== ESF-ONLY CLIENT DASHBOARD =====
 // Total Sales / PPC Sales / ACOS charted and tabled by day, with the selected

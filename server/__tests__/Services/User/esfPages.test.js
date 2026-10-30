@@ -138,6 +138,7 @@ describe('esfPages', () => {
       'reimbursement-dashboard': '/api/pagewise/reimbursement',
       issues: '/api/pagewise/issues/summary',
       'account-history': '/api/pagewise/account-history',
+      'amazon-changes': '/api/actions/ads/0123456789abcdef01234567/approve',
     };
 
     Object.entries(LIVE_ENDPOINTS).forEach(([key, path]) => {
@@ -153,6 +154,14 @@ describe('esfPages', () => {
      * instances of one mistake, each found by accident. A new page now cannot be
      * added without either mapping it or saying in writing why it needs no mapping.
      */
+    it('needs "amazon-changes" to send any change, and the page itself to prepare one', () => {
+      expect(pageKeyForApiPath('/api/actions/listings/approve-many')).toBe('amazon-changes');
+      expect(pageKeyForApiPath('/api/listings/update-product-content')).toBe('amazon-changes');
+      expect(pageKeyForApiPath('/api/pagewise/tasks/approve-actions')).toBe('amazon-changes');
+      expect(pageKeyForApiPath('/api/actions/ads/preview')).toBe('ppc-dashboard');
+      expect(pageKeyForApiPath('/api/pagewise/tasks/list')).toBe('tasks');
+    });
+
     it('accounts for EVERY page in the catalogue — mapped, or excused in writing', () => {
       const unaccounted = ESF_PAGE_KEYS.filter(
         (key) => !(key in LIVE_ENDPOINTS) && !(key in PAGES_WITHOUT_GUARDED_API),
