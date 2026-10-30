@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
-import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2, MessageSquare, ClipboardList, Radio, ListChecks } from 'lucide-react';
+import { Users, UserCog, LogOut, Menu, User, Key, HelpCircle, Building2, MessageSquare, ClipboardList, Radio, ListChecks, HardDrive } from 'lucide-react';
 import { canViewClientActivity } from '../utils/esfActivityAccess.js';
 import axiosInstance from '../config/axios.config.js';
 import { useEsfUser } from '../contexts/EsfUserContext.js';
@@ -10,6 +10,7 @@ const PAGE_TITLES = {
   '/esf/clients': { title: 'Manage client', subtitle: 'Manage all clients onboarded by the team' },
   '/esf/users': { title: 'Team members', subtitle: 'Manage who can access this portal' },
   '/esf/estore-factory/zoho-projects': { title: 'Zoho Projects', subtitle: 'Connect and manage the shared Zoho Projects account' },
+  '/esf/estore-factory/google-drive': { title: 'Google Drive', subtitle: 'Where the clients\' report PDFs are kept, by brand' },
   '/esf/messages': { title: 'Messages', subtitle: 'Client conversations — shown by project, never by name' },
   '/esf/task-requests': { title: 'Task requests', subtitle: 'Work clients have asked for — accepting creates the task in Zoho' },
   '/esf/activity': { title: 'Client activity', subtitle: 'Which clients are using SellerQI right now, and what they look at' },
@@ -118,6 +119,10 @@ const EsfLayout = () => {
             <NavLink to="/esf/estore-factory/zoho-projects" className={({ isActive }) => navItemClass(isActive)}>
               <Building2 className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium">Zoho Projects</span>
+            </NavLink>
+            <NavLink to="/esf/estore-factory/google-drive" className={({ isActive }) => navItemClass(isActive)}>
+              <HardDrive className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">Google Drive</span>
             </NavLink>
           </div>
 

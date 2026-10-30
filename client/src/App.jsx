@@ -88,6 +88,7 @@ import EstoreFactoryReportHistory from './Pages/ESF/EstoreFactory/ReportHistory.
 import EstoreFactoryMessages from './Pages/ESF/EstoreFactory/Messages.jsx';
 import EstoreFactoryBilling from './Pages/ESF/EstoreFactory/Billing.jsx';
 import EsfEstoreFactoryZoho from './Pages/ESF/EsfEstoreFactoryZoho.jsx';
+import EsfEstoreFactoryDrive from './Pages/ESF/EsfEstoreFactoryDrive.jsx';
 import EsfMessages from './Pages/ESF/EsfMessages.jsx';
 import EsfTaskRequests from './Pages/ESF/EsfTaskRequests.jsx'
 import EsfPageAccessGuard from './Layout/EsfPageAccessGuard.jsx';
@@ -225,6 +226,7 @@ const App = () => {
             <Route path='activity' element={<EsfActivity />} />
             <Route path='auto-closed' element={<EsfCloseMatches />} />
             <Route path='estore-factory/zoho-projects' element={<EsfEstoreFactoryZoho />} />
+            <Route path='estore-factory/google-drive' element={<EsfEstoreFactoryDrive />} />
             <Route path='settings' element={<EsfSettings />} />
           </Route>
           <Route path='/esf/client/:clientId' element={<EsfClientLayout />}>

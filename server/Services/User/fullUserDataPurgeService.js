@@ -149,6 +149,7 @@ const AccountMember = require('../../models/user-auth/AccountMemberModel.js');
 const Subscription = require('../../models/user-auth/SubscriptionModel.js');
 const PaymentLogs = require('../../models/system/PaymentLogsModel.js');
 const ZohoCloseMatch = require('../../models/system/ZohoCloseMatchModel.js');
+const DriveReportFolder = require('../../models/system/DriveReportFolderModel.js');
 const FixItPurchase = require('../../models/system/FixItPurchaseModel.js');
 const FixItSubscription = require('../../models/system/FixItSubscriptionModel.js');
 const FixItWorkOrder = require('../../models/system/FixItWorkOrderModel.js');
@@ -249,6 +250,9 @@ const collectionsWithUserId = [
     { model: TaskItem, key: 'userId' },
     // Zoho tasks the team closed, matched to this seller's tasks (ZohoCloseSync).
     { model: ZohoCloseMatch, key: 'userId' },
+    // Which Google Drive folder holds this client's report PDFs. The PDFs themselves are
+    // ESF's records in ESF's Drive and are not deleted from here.
+    { model: DriveReportFolder, key: 'userId' },
     { model: IssuesDataChunks, key: 'userId' },
     { model: IssuesData, key: 'userId' },
     { model: IssueSummary, key: 'userId' },
