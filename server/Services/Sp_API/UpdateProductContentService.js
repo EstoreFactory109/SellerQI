@@ -270,9 +270,13 @@ async function getListingItem(sellerId, sku, marketplaceId, baseUri, accessToken
   return response.data;
 }
 
-async function patchListingItem(sellerId, sku, marketplaceId, baseUri, accessToken, credentials, awsRegion, productType, patches) {
+/**
+ * mode 'VALIDATION_PREVIEW': Amazon checks the change and answers with its issues
+ * but saves nothing (used to preview a change before the seller approves it).
+ */
+async function patchListingItem(sellerId, sku, marketplaceId, baseUri, accessToken, credentials, awsRegion, productType, patches, mode = null) {
   const encodedSku = encodeURIComponent(sku);
-  const query = new URLSearchParams({ marketplaceIds: marketplaceId });
+  const query = new URLSearchParams({ marketplaceIds: marketplaceId, ...(mode ? { mode, includedData: 'issues' } : {}) });
   const path = `/listings/2021-08-01/items/${sellerId}/${encodedSku}?${query.toString()}`;
   const host = baseUri.replace('https://', '');
   const bodyString = JSON.stringify({ productType, patches });

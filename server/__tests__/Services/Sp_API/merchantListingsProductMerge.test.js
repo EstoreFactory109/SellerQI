@@ -121,6 +121,17 @@ describe('carryForwardProductFields — weekly listing-sync fields', () => {
         expect(row.handlingTimeDays).toBe(5);
     });
 
+    test("the daily report's own fulfilment channel wins over the carried one", () => {
+        const [row] = carryForwardProductFields([stored({ fulfillmentChannel: 'DEFAULT' })], [incoming({ fulfillmentChannel: 'AMAZON_NA' })]);
+        expect(row.fulfillmentChannel).toBe('AMAZON_NA');
+    });
+
+    test('carries the business offer SellerQI set', () => {
+        const b2bOffer = { price: 9.5, tiers: [{ minQuantity: 10, value: 9 }] };
+        const [row] = carryForwardProductFields([stored({ b2bOffer })], [incoming()]);
+        expect(row.b2bOffer).toEqual(b2bOffer);
+    });
+
     test('an empty issue list is carried too, so a fixed listing stays clear', () => {
         const [row] = carryForwardProductFields([stored({ listingIssues: [] })], [incoming()]);
         expect(row.listingIssues).toEqual([]);

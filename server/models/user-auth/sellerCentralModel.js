@@ -80,9 +80,9 @@ const Products=new mongoose.Schema({
     required: false,
     default: false
   },
-  // From the weekly listing-items sync: who fulfils this SKU ('DEFAULT' = the seller,
-  // i.e. FBM; anything else = Amazon) and the handling time the seller set. Unset until
-  // that sync has run for the SKU.
+  // Who fulfils this SKU ('DEFAULT' = the seller, i.e. FBM; anything else = Amazon):
+  // from the daily merchant listings report's fulfillment-channel column, and the
+  // weekly listing-items sync. handlingTimeDays: the handling time the seller set.
   fulfillmentChannel:{
     type: String,
     required: false,
@@ -109,6 +109,21 @@ const Products=new mongoose.Schema({
   },
   mainImage:{
     type: String,
+    required: false,
+    default: undefined
+  },
+  // FBM stock the seller has on this offer (the merchant listings report's quantity
+  // for a seller-fulfilled SKU; `quantity` is overwritten with FBA stock for FBA SKUs).
+  // Also set after the seller updates stock through SellerQI.
+  fbmQuantity:{
+    type: Number,
+    required: false,
+    default: undefined
+  },
+  // The business (B2B) offer as last read or set through SellerQI:
+  // { price, currency, discountType, tiers:[{minQuantity,value}], salePrice, saleStart, saleEnd, at }.
+  b2bOffer:{
+    type: mongoose.Schema.Types.Mixed,
     required: false,
     default: undefined
   }

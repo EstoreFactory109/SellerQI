@@ -19,6 +19,7 @@ for (const mod of [
     require('./handlers/ads.js'),
     require('./handlers/adsCampaigns.js'),
     require('./handlers/listings.js'),
+    require('./handlers/listingsOffers.js'),
     require('./handlers/messaging.js')
 ]) {
     for (const handler of mod.handlers) {

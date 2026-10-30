@@ -24,6 +24,7 @@ import { formatCurrencyWithLocale, formatYAxisCurrency } from '../../utils/curre
 import { resolveProfitabilityQueryDates } from '../../utils/profitabilityDateRange.js';
 import ProductPPCIssuesTable from '../../Components/ProductDetails/ProductPPCIssuesTable.jsx';
 import FbaInventorySection from '../../Components/ProductDetails/FbaInventorySection.jsx';
+import OfferActions from '../../Components/ProductDetails/OfferActions.jsx';
 
 /** Normalize API fields that may be a number or `{ amount }` (asin-wise-sales / economics). */
 function pickNumericAmount(v) {
@@ -1857,6 +1858,8 @@ const Dashboard = () => {
                     </div>
                 </motion.div>
 
+                {/* FBM stock and business pricing (approved before anything is sent; hidden until switched on) */}
+                <OfferActions sku={updatedProduct.sku} />
                 <FbaInventorySection asin={updatedProduct.asin} />
 
                 {/* Section 2: Performance (metrics, recommendations, trends) with WoW/MoM */}

@@ -100,7 +100,10 @@ function carryForwardProductFields(existingProducts, incomingProducts) {
         // were wiped by Monday's rebuild. Safe to carry: the next weekly fetch writes `[]` for a
         // listing Amazon no longer flags, so a fixed listing still clears.
         if (Array.isArray(prev.listingIssues)) row.listingIssues = prev.listingIssues;
-        if (prev.fulfillmentChannel) row.fulfillmentChannel = prev.fulfillmentChannel;
+        // The report's own channel wins; the weekly sync's fills in when it has none.
+        if (!row.fulfillmentChannel && prev.fulfillmentChannel) row.fulfillmentChannel = prev.fulfillmentChannel;
+        // Set only when the seller changes business pricing through SellerQI.
+        if (prev.b2bOffer) row.b2bOffer = prev.b2bOffer;
         if (prev.handlingTimeDays !== undefined && prev.handlingTimeDays !== null) row.handlingTimeDays = prev.handlingTimeDays;
         if (prev.brand) row.brand = prev.brand;
         if (prev.bulletsHash) row.bulletsHash = prev.bulletsHash;
@@ -391,6 +394,11 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                     'quantité', 'quantite', 'quantità', 'cantidad'
                 ) || 0) || 0;
 
+                // 'DEFAULT' = the seller fulfils it (FBM); AMAZON_NA / AMAZON_EU / ... = FBA.
+                const fulfillmentChannel = String(findField(data,
+                    'fulfillment-channel', 'Fulfillment Channel', 'fulfilment-channel', 'fulfillment_channel'
+                ) || '').trim();
+
                 // Only add products that have required fields (asin and sku)
                 if (asin && sku) {
                     ProductData.push({
@@ -400,6 +408,9 @@ const getReport = async (accessToken, marketplaceIds, userId, country, region, b
                         price: price,
                         status: status || 'Active',
                         quantity: quantity,
+                        ...(fulfillmentChannel ? { fulfillmentChannel } : {}),
+                        // For an FBM SKU the report's quantity IS the seller's stock.
+                        ...(fulfillmentChannel === 'DEFAULT' ? { fbmQuantity: quantity } : {}),
                     });
                 } else {
                     logger.debug('[GET_MERCHANT_LISTINGS_ALL_DATA] Skipping product with missing asin or sku:', {
