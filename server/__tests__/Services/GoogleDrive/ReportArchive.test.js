@@ -103,17 +103,21 @@ describe('saveReportsToDrive', () => {
 });
 
 describe('archiveReadiness', () => {
-    it('is off unless GDRIVE_REPORTS_ENABLED is true', async () => {
+    it('is on by default once a Drive is connected', async () => {
+        expect(await archiveReadiness()).toEqual({ ready: true, reason: null });
+    });
+
+    it('is off when GDRIVE_REPORTS_ENABLED is false, even when connected', async () => {
+        process.env.GDRIVE_REPORTS_ENABLED = 'false';
         expect((await archiveReadiness()).ready).toBe(false);
     });
 
     it('is off when no Drive is connected', async () => {
-        process.env.GDRIVE_REPORTS_ENABLED = 'true';
         mockState.connection = null;
         expect(await archiveReadiness()).toEqual({ ready: false, reason: 'no Google Drive is connected' });
     });
 
-    it('is on when enabled and connected', async () => {
+    it('is on when explicitly enabled and connected', async () => {
         process.env.GDRIVE_REPORTS_ENABLED = 'true';
         expect((await archiveReadiness()).ready).toBe(true);
     });

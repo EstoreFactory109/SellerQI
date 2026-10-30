@@ -17,7 +17,8 @@
  *                            https://members.sellerqi.com/api/gdrive/auth/callback
  *
  * Optional:
- *   GDRIVE_REPORTS_ENABLED   'true' to save reports; default OFF
+ *   GDRIVE_REPORTS_ENABLED   'false' to stop saving reports; default ON (saving starts
+ *                            as soon as a Drive is connected)
  *   GDRIVE_ROOT_FOLDER_NAME  default "SellerQI Reports"
  *
  * ── WHY drive.file AND NOTHING WIDER ──
@@ -40,11 +41,10 @@
  *    expires refresh tokens after 7 days and saving stops with `invalid_grant`.
  *
  * ── TURNING IT ON ──
- * Deploy with GDRIVE_REPORTS_ENABLED unset. An owner/admin clicks Connect on the Google
- * Drive page and signs in as the ESF Google account. Rehearse one client:
+ * An owner/admin clicks Connect on the Google Drive page and signs in as the ESF Google
+ * account; from the next report run on, the PDFs are saved. Nothing is saved before a
+ * Drive is connected. To fill a client's folder without waiting or emailing anyone:
  *     node server/Services/BackgroundJobs/esfReportsMailerStandalone.js --run=weekly --drive-only --user=<id>
- * (with GDRIVE_REPORTS_ENABLED=true for that command), check the folder, then set the
- * flag in .env and restart cron-producer.
  *
  * ── ROLLBACK ──
  * GDRIVE_REPORTS_ENABLED=false. Emails are untouched either way, and nothing in Drive is
@@ -67,8 +67,11 @@ const getCredentials = () => ({
     redirectUri: process.env.GDRIVE_REDIRECT_URI,
 });
 
-/** Master switch, default OFF: the code ships before anyone has connected a Drive. */
-const isReportsArchiveEnabled = () => process.env.GDRIVE_REPORTS_ENABLED === 'true';
+/**
+ * Kill switch, default ON. Saving still needs a connected Drive (ReportArchive.archiveReadiness),
+ * so until someone clicks Connect this changes nothing.
+ */
+const isReportsArchiveEnabled = () => String(process.env.GDRIVE_REPORTS_ENABLED || '').trim().toLowerCase() !== 'false';
 
 const rootFolderName = () => (process.env.GDRIVE_ROOT_FOLDER_NAME || '').trim() || 'SellerQI Reports';
 

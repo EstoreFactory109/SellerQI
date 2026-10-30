@@ -150,7 +150,7 @@ export default function EsfDriveIntegration() {
               </div>
               <div>
                 <dt className="text-gray-500">Saving reports</dt>
-                <dd className="text-gray-200">{status.enabled ? 'On' : 'Off (GDRIVE_REPORTS_ENABLED is not true)'}</dd>
+                <dd className="text-gray-200">{status.enabled ? 'On' : 'Off (GDRIVE_REPORTS_ENABLED=false on the server)'}</dd>
               </div>
               <div>
                 <dt className="text-gray-500">Last report saved</dt>

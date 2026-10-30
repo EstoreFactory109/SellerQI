@@ -16,11 +16,11 @@ const { ensureClientFolder } = require('./ReportFolders.js');
 const { isReportsArchiveEnabled } = require('./config.js');
 
 /**
- * Whether this run should save to Drive: switched on AND a Drive connected. Checked once
+ * Whether this run should save to Drive: not switched off AND a Drive connected. Checked once
  * per run by the mailer, so a missing connection is one log line, not one per client.
  */
 const archiveReadiness = async () => {
-    if (!isReportsArchiveEnabled()) return { ready: false, reason: 'GDRIVE_REPORTS_ENABLED is not true' };
+    if (!isReportsArchiveEnabled()) return { ready: false, reason: 'switched off by GDRIVE_REPORTS_ENABLED=false' };
     const connection = await DriveConnection.findOne({ key: DriveConnection.SINGLETON_KEY })
         .select('+refreshToken')
         .lean();

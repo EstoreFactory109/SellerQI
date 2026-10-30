@@ -27,8 +27,8 @@
  * failing with ECONNRESET / EPIPE / SES "451 Timeout waiting for data".
  *
  * GOOGLE DRIVE COPY
- * With GDRIVE_REPORTS_ENABLED=true and a Drive connected (Estore Factory > Google
- * Drive), the same PDFs are also saved to "SellerQI Reports / <brand> / <cadence>"
+ * Once a Drive is connected (Estore Factory > Google Drive; GDRIVE_REPORTS_ENABLED=false
+ * turns it off), the same PDFs are also saved to "SellerQI Reports / <brand> / <cadence>"
  * (Services/GoogleDrive/ReportArchive.js) — before the email, and never at its expense.
  */
 const logger = require('../../utils/Logger.js');
