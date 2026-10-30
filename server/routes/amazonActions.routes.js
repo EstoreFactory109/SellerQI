@@ -21,6 +21,8 @@ router.get('/ads/new-campaign-options', auth, getLocation, c.adsNewCampaignOptio
 router.get('/reports/pending', auth, getLocation, c.pendingReports);
 router.get('/orders/unshipped', auth, getLocation, c.unshippedOrders);
 router.get('/notifications/subscriptions', auth, getLocation, c.notificationSubscriptions);
+router.get('/listings/product-types', auth, getLocation, c.listingProductTypes);
+router.get('/listings/fields', auth, getLocation, c.listingFields);
 router.get('/orders/:orderId(\\d{3}-\\d{7}-\\d{7})', auth, getLocation, c.orderDetail);
 
 router.post(`/${FEATURE}/preview`, auth, getLocation, c.preview);

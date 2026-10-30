@@ -20,6 +20,7 @@ for (const mod of [
     require('./handlers/adsCampaigns.js'),
     require('./handlers/listings.js'),
     require('./handlers/listingsOffers.js'),
+    require('./handlers/listingsCreate.js'),
     require('./handlers/messaging.js'),
     require('./handlers/feeds.js'),
     require('./handlers/orders.js'),

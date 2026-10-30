@@ -198,7 +198,42 @@ const notificationSubscriptions = handle(async (req) => {
     };
 });
 
+/** Product types that match the seller's words (for a new product). */
+const listingProductTypes = handle(async (req) => {
+    const { credentialsFor } = require('../../Services/Sp_API/spApiClient.js');
+    const { searchProductTypes } = require('../../Services/Sp_API/ProductTypeDefinitionsService.js');
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return { productTypes: [] };
+    const creds = await credentialsFor(req.userId, req.country, req.region);
+    return { productTypes: await searchProductTypes(creds, q) };
+});
+
+/** The fields a product type needs, as simple form fields (and, for a SKU, its current values). */
+const listingFields = handle(async (req) => {
+    const { credentialsFor } = require('../../Services/Sp_API/spApiClient.js');
+    const PTD = require('../../Services/Sp_API/ProductTypeDefinitionsService.js');
+    const creds = await credentialsFor(req.userId, req.country, req.region);
+    let productType = String(req.query.productType || '').trim().toUpperCase();
+    let current = null;
+    if (req.query.sku) {
+        const { readLiveListing } = require('../../Services/Sp_API/UpdateProductContentService.js');
+        const live = await readLiveListing({ sku: String(req.query.sku), userId: req.userId, country: req.country, region: req.region });
+        productType = live.productType || productType;
+        current = live.listing?.attributes || {};
+    }
+    if (!productType) throw Object.assign(new Error('Choose the product type.'), { statusCode: 400 });
+    const def = await PTD.getDefinition(creds, productType, 'LISTING', req.country);
+    const { fields, unsupportedRequired } = PTD.formFields(def.schema);
+    const values = current ? Object.fromEntries(fields.filter((f) => current[f.name]).map((f) => {
+        const list = current[f.name];
+        if (f.kind === 'measure') return [f.name, { value: list[0]?.value, unit: list[0]?.unit }];
+        return [f.name, f.multiple ? list.map((e) => e.value) : list[0]?.value];
+    })) : {};
+    return { productType, displayName: def.displayName, fields, unsupportedRequired, values };
+});
+
 module.exports = {
+    listingProductTypes, listingFields,
     notificationSubscriptions,
     unshippedOrders, orderDetail,
     pendingReports,

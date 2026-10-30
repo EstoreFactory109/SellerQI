@@ -38,6 +38,7 @@ import axiosInstance from '../../config/axios.config.js';
 import DownloadReport from '../../Components/DownloadReport/DownloadReport.jsx';
 import MarketplaceSwitcher from '../../Components/Marketplace/MarketplaceSwitcher.jsx'
 import BulkStockUpdate from '../../Components/Products/BulkStockUpdate.jsx';
+import NewListingButton from '../../Components/Listings/NewListingButton.jsx';
 import ChangeHistoryPanel from '../../Components/Actions/ChangeHistoryPanel.jsx';
 import PendingReportsPanel from '../../Components/Actions/PendingReportsPanel.jsx';
 
@@ -920,6 +921,7 @@ const YourProducts = () => {
           </div>
           <div className="flex items-center gap-2">
           <MarketplaceSwitcher />
+          <NewListingButton />
           <BulkStockUpdate onSent={() => setChangesRefresh((n) => n + 1)} />
           <DownloadReport
             prepareDataFunc={prepareYourProductsExport}

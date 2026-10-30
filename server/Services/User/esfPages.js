@@ -129,6 +129,7 @@ const API_PATH_TO_PAGE = [
     // needs the page it is made from; sending it needs "amazon-changes".
     ['/api/actions/ads', 'ppc-dashboard'],
     ['/api/actions/feeds', 'your-products'],
+    ['/api/actions/listings', 'your-products'],
     ['/api/actions/orders', 'fbm-orders'],
     ['/api/actions/messaging', 'fbm-orders'],
     [/^\/api\/actions\/[^/]+\/(?:[0-9a-fA-F]{24}\/approve|approve-many)(?:[/?]|$)/, 'amazon-changes'],

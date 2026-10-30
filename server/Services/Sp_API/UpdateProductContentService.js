@@ -285,6 +285,33 @@ async function patchListingItem(sellerId, sku, marketplaceId, baseUri, accessTok
   return response.data;
 }
 
+/**
+ * Create or fully replace a listing (Listings Items PUT). body: { productType,
+ * requirements, attributes }. mode 'VALIDATION_PREVIEW' checks without saving.
+ * A 404 from getListingItem means the SKU does not exist yet.
+ */
+async function putListingItem(sellerId, sku, marketplaceId, baseUri, accessToken, credentials, awsRegion, body, mode = null) {
+  const encodedSku = encodeURIComponent(sku);
+  const query = new URLSearchParams({ marketplaceIds: marketplaceId, ...(mode ? { mode, includedData: 'issues' } : {}) });
+  const path = `/listings/2021-08-01/items/${sellerId}/${encodedSku}?${query.toString()}`;
+  const host = baseUri.replace('https://', '');
+  const bodyString = JSON.stringify(body);
+  const signed = signRequest(host, path, 'PUT', accessToken, credentials, awsRegion, bodyString);
+  const response = await axios.put(`https://${host}${path}`, bodyString, { headers: signed.headers });
+  return response.data;
+}
+
+/** The signing context for a seller marketplace (no listing read). */
+async function listingContext({ userId, country, region }) {
+  const { refreshToken, sellerId } = await getRefreshTokenForSeller(userId, country, region);
+  const accessToken = await generateAccessToken(userId, refreshToken);
+  if (!accessToken) throw new ApiError(500, 'Failed to generate access token');
+  const { baseUri, marketplaceId, awsRegion } = getRegionConfig(region, country);
+  const credentials = await getTemporaryCredentials(awsRegion);
+  if (!credentials?.AccessKey) throw new ApiError(500, 'Failed to get AWS credentials');
+  return { sellerId, marketplaceId, baseUri, accessToken, credentials, awsRegion };
+}
+
 async function getCatalogItem(asin, marketplaceId, baseUri, accessToken, credentials, awsRegion) {
   const query = new URLSearchParams({
     marketplaceIds: marketplaceId,
@@ -1436,6 +1463,9 @@ module.exports = {
   getRefreshTokenForSeller,
   getListingItem,
   patchListingItem,
+  putListingItem,
+  getCatalogItem,
+  listingContext,
   autoFixListing,
   autoFixCatalogConflicts,
   fixSingleAttribute,

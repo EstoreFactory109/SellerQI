@@ -3,6 +3,7 @@ import { COLORS } from '../Shared/index.js';
 import { useChangeRequest } from '../Actions/ChangeRequestModal.jsx';
 import useActionCapabilities from '../../hooks/useActionCapabilities.js';
 import Dialog, { Field, PrimaryButton, SecondaryButton, fieldStyle } from '../Actions/Dialog.jsx';
+import ReplaceListingDialog from '../Listings/ReplaceListingDialog.jsx';
 
 /** FBM stock: the approval window shows the stock on Amazon now and Amazon's own check. */
 const StockDialog = ({ sku, onCancel, onReview }) => {
@@ -90,7 +91,8 @@ const OfferActions = ({ sku }) => {
   const [message, setMessage] = useState('');
   const canStock = can('listings.update_fbm_stock');
   const canB2B = can('listings.set_b2b_pricing');
-  if (!loaded || !sku || (!canStock && !canB2B)) return null;
+  const canReplace = can('listings.replace_listing');
+  if (!loaded || !sku || (!canStock && !canB2B && !canReplace)) return null;
 
   const run = async (actionType, input) => {
     setDialog(null);
@@ -106,6 +108,8 @@ const OfferActions = ({ sku }) => {
       {message && <span role="status" className="text-xs" style={{ color: COLORS.good }}>{message}</span>}
       {canStock && <button type="button" onClick={() => setDialog('stock')} className="px-3 py-1.5 rounded-lg text-xs border" style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}>Update FBM stock</button>}
       {canB2B && <button type="button" onClick={() => setDialog('b2b')} className="px-3 py-1.5 rounded-lg text-xs border" style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}>Business pricing</button>}
+      {canReplace && <button type="button" onClick={() => setDialog('replace')} className="px-3 py-1.5 rounded-lg text-xs border" style={{ borderColor: COLORS.border, color: COLORS.textPrimary, background: 'transparent' }}>Replace listing</button>}
+      {dialog === 'replace' && <ReplaceListingDialog sku={sku} onClose={() => setDialog(null)} onReview={(input) => run('listings.replace_listing', input)} />}
       {dialog === 'stock' && <StockDialog sku={sku} onCancel={() => setDialog(null)} onReview={(input) => run('listings.update_fbm_stock', input)} />}
       {dialog === 'b2b' && <B2BDialog sku={sku} onCancel={() => setDialog(null)} onReview={(input) => run('listings.set_b2b_pricing', input)} />}
     </section>
