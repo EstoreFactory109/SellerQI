@@ -33,4 +33,34 @@ async function requestFeedbackUpdate({ userId, country, region, orderId }) {
     return { orderId, sent: true };
 }
 
-module.exports = { requestFeedbackUpdate, allowedMessageActions };
+/**
+ * Every message Amazon allows for this order now, with the fields each needs
+ * (Amazon embeds each message's JSON schema in the same answer; seen live:
+ * rawMessageBody up to 2000 characters, some messages require attachments).
+ */
+async function messageOptions({ accessToken, host, marketplaceId, orderId }) {
+    const res = await axios.get(`${host}/messaging/v1/orders/${encodeURIComponent(orderId)}?marketplaceIds=${marketplaceId}`,
+        { headers: { 'x-amz-access-token': accessToken }, timeout: 30000 });
+    return (res.data?._embedded?.actions || []).map((a) => {
+        const schema = a._embedded?.schema || {};
+        return {
+            name: a.name,
+            title: schema.title || a.name,
+            description: schema.description || '',
+            required: Array.isArray(schema.required) ? schema.required : [],
+            fields: Object.fromEntries(Object.entries(schema.properties || {}).map(([k, v]) => [k, { type: v.type, maxLength: v.maxLength ?? null, minLength: v.minLength ?? null }]))
+        };
+    });
+}
+
+async function sendMessage({ accessToken, host, marketplaceId, orderId, action, body }) {
+    const res = await axios.post(
+        `${host}/messaging/v1/orders/${encodeURIComponent(orderId)}/messages/${encodeURIComponent(action)}?marketplaceIds=${marketplaceId}`,
+        body, { headers: { 'x-amz-access-token': accessToken, 'Content-Type': 'application/json' }, timeout: 30000 });
+    if (Array.isArray(res.data?.errors) && res.data.errors.length > 0) {
+        throw Object.assign(new Error(`Amazon rejected it: ${JSON.stringify(res.data.errors[0]).slice(0, 300)}`), { response: res.data });
+    }
+    return { orderId, action, sent: true };
+}
+
+module.exports = { requestFeedbackUpdate, allowedMessageActions, messageOptions, sendMessage };

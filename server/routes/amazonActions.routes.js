@@ -8,7 +8,7 @@ const auth = require('../middlewares/Auth/auth.js');
 const { getLocation } = require('../middlewares/Auth/getLocation.js');
 const c = require('../controllers/actions/AmazonActionsController.js');
 
-const FEATURE = ':feature(ads|listings|messaging|feeds|reports)';
+const FEATURE = ':feature(ads|listings|messaging|feeds|reports|orders)';
 // Mongo ObjectId only, so "approve-many" never matches as an id.
 const ID = ':id([0-9a-fA-F]{24})';
 
@@ -19,6 +19,8 @@ router.get('/ads/campaigns', auth, getLocation, c.adsCampaigns);
 router.get('/ads/campaigns/:campaignId([0-9]+)/ad-groups', auth, getLocation, c.adsCampaignAdGroups);
 router.get('/ads/new-campaign-options', auth, getLocation, c.adsNewCampaignOptions);
 router.get('/reports/pending', auth, getLocation, c.pendingReports);
+router.get('/orders/unshipped', auth, getLocation, c.unshippedOrders);
+router.get('/orders/:orderId(\\d{3}-\\d{7}-\\d{7})', auth, getLocation, c.orderDetail);
 
 router.post(`/${FEATURE}/preview`, auth, getLocation, c.preview);
 router.post(`/${FEATURE}/approve-many`, auth, getLocation, c.approveMany);

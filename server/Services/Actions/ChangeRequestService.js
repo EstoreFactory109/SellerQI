@@ -219,17 +219,32 @@ async function cancelDraft({ id, userId, country, region }) {
 async function pollOne(id) {
     const now = new Date();
     const doc = await ChangeRequest.findOneAndUpdate(
-        { _id: id, status: 'awaiting_amazon', nextPollAt: { $lte: now } },
+        { _id: id, status: { $in: ['awaiting_amazon', 'unknown'] }, nextPollAt: { $lte: now } },
         { $set: { nextPollAt: new Date(now.getTime() + 2 * 60 * 1000) }, $inc: { pollCount: 1 } },
         { new: true }
     ).lean();
     if (!doc) return null;
     const handler = registry.get(doc.actionType);
-    const set = async (fields) => view(await ChangeRequest.findOneAndUpdate({ _id: doc._id, status: 'awaiting_amazon' }, { $set: fields }, { new: true }).lean() || doc);
-    if (!handler?.poll) return set({ status: 'failed', error: 'SellerQI cannot follow up this change.', nextPollAt: null });
+    const set = async (fields) => view(await ChangeRequest.findOneAndUpdate({ _id: doc._id, status: doc.status }, { $set: fields }, { new: true }).lean() || doc);
     const started = new Date(doc.approvedAt || doc.createdAt).getTime();
+    const ctx = { userId: doc.userId, country: doc.country, region: doc.region };
+
+    // A send that timed out: find out from Amazon whether it went through. Never resent.
+    if (doc.status === 'unknown') {
+        if (!handler?.reconcile) return set({ nextPollAt: null });
+        try {
+            const verdict = await handler.reconcile(doc, ctx);
+            if (verdict === 'succeeded' || verdict === 'failed') {
+                return set({ status: verdict, error: verdict === 'failed' ? 'Amazon did not receive the change; nothing changed. You can send it again.' : '', nextPollAt: null });
+            }
+        } catch (_) { /* ask again later */ }
+        if (Date.now() - started > POLL_GIVE_UP_MS) return set({ nextPollAt: null, error: 'Amazon could not say whether this went through. Check it in Seller Central before sending it again.' });
+        return set({ nextPollAt: nextPollAfter(Math.max(doc.pollCount, POLL_DELAYS_MS.length)) });
+    }
+
+    if (!handler?.poll) return set({ status: 'failed', error: 'SellerQI cannot follow up this change.', nextPollAt: null });
     try {
-        const out = await handler.poll(doc, { userId: doc.userId, country: doc.country, region: doc.region });
+        const out = await handler.poll(doc, ctx);
         if (out?.status === 'pending') {
             if (Date.now() - started > POLL_GIVE_UP_MS) {
                 return set({ status: 'failed', error: 'Amazon has not finished processing this after a day. Check it in Seller Central.', nextPollAt: null });
@@ -248,7 +263,7 @@ async function pollOne(id) {
 
 /** Follow up every change that is due (the cron poller). */
 async function pollDue({ limit = 20 } = {}) {
-    const due = await ChangeRequest.find({ status: 'awaiting_amazon', nextPollAt: { $lte: new Date() } })
+    const due = await ChangeRequest.find({ status: { $in: ['awaiting_amazon', 'unknown'] }, nextPollAt: { $lte: new Date() } })
         .sort({ nextPollAt: 1 }).limit(limit).select('_id').lean();
     let done = 0;
     for (const d of due) {
@@ -261,7 +276,7 @@ async function get({ id, userId, country, region }) {
     let doc = await ChangeRequest.findOne({ _id: id, userId, country, region }).lean();
     if (!doc) throw refusal(404, 'Change not found.');
     // The approval window polls this while Amazon works: follow up when due.
-    if (doc.status === 'awaiting_amazon' && doc.nextPollAt && new Date(doc.nextPollAt) <= new Date()) {
+    if (['awaiting_amazon', 'unknown'].includes(doc.status) && doc.nextPollAt && new Date(doc.nextPollAt) <= new Date()) {
         await pollOne(doc._id).catch(() => null);
         doc = await ChangeRequest.findOne({ _id: id, userId, country, region }).lean();
     }

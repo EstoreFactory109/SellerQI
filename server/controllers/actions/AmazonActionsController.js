@@ -149,7 +149,41 @@ const pendingReports = handle(async (req) => {
     };
 });
 
+/** Unshipped orders you ship yourself (FBM), live. */
+const unshippedOrders = handle(async (req) => {
+    const { credentialsFor } = require('../../Services/Sp_API/spApiClient.js');
+    const { listUnshippedMfnOrders } = require('../../Services/Sp_API/OrderFulfillmentService.js');
+    const creds = await credentialsFor(req.userId, req.country, req.region);
+    const orders = await listUnshippedMfnOrders(creds, { days: Math.min(Math.max(Number(req.query.days) || 30, 1), 90) });
+    return { orders: orders.sort((a, b) => String(a.latestShipDate).localeCompare(String(b.latestShipDate))) };
+});
+
+/** One order: its items and the messages Amazon allows for it now. */
+const orderDetail = handle(async (req) => {
+    const { credentialsFor } = require('../../Services/Sp_API/spApiClient.js');
+    const O = require('../../Services/Sp_API/OrderFulfillmentService.js');
+    const { messageOptions } = require('../../Services/Sp_API/FeedbackRequest.js');
+    const creds = await credentialsFor(req.userId, req.country, req.region);
+    const [order, items, messages] = await Promise.all([
+        O.getOrder(creds, req.params.orderId),
+        O.getOrderItems(creds, req.params.orderId),
+        messageOptions({ ...creds, orderId: req.params.orderId }).catch(() => [])
+    ]);
+    if (!order) throw Object.assign(new Error('Order not found.'), { statusCode: 404 });
+    const { CARRIERS } = require('../../Services/Actions/handlers/orders.js');
+    return {
+        order, items, carriers: CARRIERS,
+        messages: messages.filter((m) => m.name !== 'updateFeedback').map((m) => ({
+            name: m.name, title: m.title, description: m.description,
+            maxLength: m.fields.rawMessageBody?.maxLength || null,
+            // Only text messages can be sent from SellerQI for now.
+            supported: m.required.every((f) => f === 'rawMessageBody') && !!m.fields.rawMessageBody
+        }))
+    };
+});
+
 module.exports = {
+    unshippedOrders, orderDetail,
     pendingReports,
     getCapabilities, getHistory, preview, approve, approveMany, getOne, cancel, approverOf,
     adsCampaigns, adsCampaignAdGroups, adsNewCampaignOptions

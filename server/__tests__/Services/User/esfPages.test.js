@@ -139,6 +139,7 @@ describe('esfPages', () => {
       issues: '/api/pagewise/issues/summary',
       'account-history': '/api/pagewise/account-history',
       'amazon-changes': '/api/actions/ads/0123456789abcdef01234567/approve',
+      'fbm-orders': '/api/actions/orders/unshipped',
     };
 
     Object.entries(LIVE_ENDPOINTS).forEach(([key, path]) => {

@@ -15,6 +15,7 @@ import { fetchAccountIssues, fetchYourProductsSummaryV3 } from '../../redux/slic
 import { fetchTasks } from '../../redux/slices/TasksSlice.js';
 import stripeService from '../../services/stripeService';
 import { COLORS } from '../Shared/index.js';
+import useActionCapabilities from '../../hooks/useActionCapabilities.js';
 
 // "NW" from "Northwind Goods" - first letter of up to the first two words.
 const getInitials = (name) => {
@@ -145,6 +146,8 @@ const NavDropdown = ({ icon, label, open, onToggle, isActive, count, locked, chi
 const dropdownItemClass = "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors";
 
 const LeftNavSection = () => {
+    // Pages for changes on Amazon appear only once switched on for the account.
+    const { can: canChange } = useActionCapabilities();
 
     const dispatch = useDispatch();
     const navigate=useNavigate();
@@ -340,6 +343,10 @@ const LeftNavSection = () => {
                                 />
                                 {SHOW_RECENT_ORDERS_NAV && (
                                     <NavItem to="/seller-central-checker/review-request" icon={Clock8} label="Review Requests" locked={isPremiumLocked} />
+                                )}
+                                {/* Only once confirming FBM shipments is switched on for the account */}
+                                {canChange('orders.confirm_shipment') && (
+                                    <NavItem to="/seller-central-checker/fbm-orders" icon={Clock8} label="Orders to Ship" locked={isPremiumLocked} />
                                 )}
                                 <NavItem to="/seller-central-checker/account-history" icon={Clock8} label="Accounts History" locked={isPremiumLocked} />
                                 {/* User Logging - Only for Super Admins */}

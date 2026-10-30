@@ -9,6 +9,7 @@ const matches = (doc, filter) => Object.entries(filter).every(([k, v]) => {
     const val = doc[k];
     if (v && typeof v === 'object' && !(v instanceof Date)) {
         if ('$ne' in v) return String(val) !== String(v.$ne);
+        if ('$in' in v) return v.$in.map(String).includes(String(val));
         if ('$gt' in v) return val instanceof Date && val > v.$gt;
         if ('$gte' in v) return val instanceof Date && val >= v.$gte;
         if ('$lte' in v) return val instanceof Date && val <= v.$lte;
@@ -28,7 +29,7 @@ jest.mock('../../../models/MCP/AmazonChangeRequestModel.js', () => ({
         return lean(doc ? { ...doc } : null);
     },
     findOne: (filter) => lean(mockDocs.find((d) => matches(d, filter)) || null),
-    find: (filter) => ({ sort: () => ({ limit: () => ({ lean: async () => [...mockDocs].filter((d) => !filter?.status || typeof filter.status !== 'string' || d.status === filter.status), select: () => ({ lean: async () => mockDocs.filter((d) => d.status === filter.status && d.nextPollAt <= new Date()).map((d) => ({ _id: d._id })) }) }) }) })
+    find: (filter) => ({ sort: () => ({ limit: () => ({ lean: async () => [...mockDocs].filter((d) => !filter?.status || typeof filter.status !== 'string' || d.status === filter.status), select: () => ({ lean: async () => mockDocs.filter((d) => matches(d, filter)).map((d) => ({ _id: d._id })) }) }) }) })
 }));
 
 const mockSent = [];
@@ -211,5 +212,22 @@ describe('staff-only changes', () => {
         expect(S.capabilities('U1', { userId: 'U1', esfUserId: 'E1' }).features.ads[0].enabled).toBe(true);
         const d = await S.createPreview({ ...base, feature: 'ads', actionType: 'ads.fake', input: { ids: ['K1'] }, createdBy: { superAdminId: 'SA' } });
         await expect(S.approve({ ...base, id: d.id, feature: 'ads', approvedBy: { userId: 'U1' } })).resolves.toMatchObject({ status: 'failed' });
+    });
+});
+
+describe('a send that timed out', () => {
+    it('is settled by asking Amazon, never by sending again', async () => {
+        let verdict = 'unknown';
+        mockHandler = fakeHandler({ idempotent: false, reconcile: async () => verdict });
+        const d = await draft();
+        mockExecuteError = Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' });
+        expect((await S.approve({ ...base, id: d.id, feature: 'ads' })).status).toBe('unknown');
+        mockDocs[0].nextPollAt = new Date(Date.now() - 1000);
+        await S.pollOne(mockDocs[0]._id);
+        expect(mockDocs[0].status).toBe('unknown');
+        verdict = 'succeeded';
+        mockDocs[0].nextPollAt = new Date(Date.now() - 1000);
+        expect((await S.pollOne(mockDocs[0]._id)).status).toBe('succeeded');
+        expect(mockSent).toHaveLength(0);
     });
 });

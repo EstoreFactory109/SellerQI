@@ -27,6 +27,7 @@ import { Outlet } from 'react-router-dom';
 import { Navigate } from 'react-router-dom';
 import ProfitibilityDashboard from './Pages/Dashboard/ProfitibilityDashboard.jsx';
 import RecentOrders from './Pages/Dashboard/RecentOrders.jsx';
+import FbmOrders from './Pages/Orders/FbmOrders.jsx';
 import PPCDashboard from './Pages/Dashboard/PPCDashboard.jsx';
 import KeywordAnalysisDashboard from './Pages/Dashboard/KeywordAnalysisDashboard.jsx';
 import EmailVerificationForNewPassword from './Pages/Auth/EmailVerificationForNewPassword.jsx';
@@ -317,6 +318,7 @@ const App = () => {
               <Route path='estore-factory/billing' element={<EstoreFactoryBilling />} />
             </Route>
             <Route path='review-request' element={<RecentOrders />} />
+            <Route path='fbm-orders' element={<FbmOrders />} />
             <Route path='qmate' element={<Navigate to='/seller-central-checker/dashboard' replace />} />
             <Route path='profitibility-dashboard' element={<ProfitibilityDashboard />} />
             <Route path='ppc-dashboard' element={<PPCDashboard />} />
