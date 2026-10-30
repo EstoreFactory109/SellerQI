@@ -6,6 +6,7 @@ import Profile from '../../Components/settings/UserProfile/Profile.jsx';
 import Security from '../../Components/settings/Security/Security.jsx';
 import Teams from '../../Components/settings/Teams/Teams.jsx';
 import AccountIntegration from '../../Components/settings/AccountIntegrations/AccountIntegrations.jsx';
+import LiveUpdatesPanel from '../../Components/settings/AccountIntegrations/LiveUpdatesPanel.jsx';
 import PlansAndBilling from '../../Components/settings/PlansAndBilling/PlansAndBilling.jsx';
 import Support from '../../Components/settings/Support/Support.jsx';
 
@@ -27,7 +28,12 @@ const Settings = () => {
       case 'security':
         return <Security />;
       case 'account-integration':
-        return <AccountIntegration />;
+        return (
+          <>
+            <AccountIntegration />
+            <LiveUpdatesPanel />
+          </>
+        );
       case 'plans-billing':
         return <PlansAndBilling />;
       case 'members':

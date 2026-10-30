@@ -182,7 +182,24 @@ const orderDetail = handle(async (req) => {
     };
 });
 
+/** The kinds of live update, and which are on for this account. */
+const notificationSubscriptions = handle(async (req) => {
+    const { TYPES } = require('../../Services/Actions/handlers/notifications.js');
+    const Subscription = require('../../models/MCP/NotificationSubscriptionModel.js');
+    const Destination = require('../../models/MCP/NotificationDestinationModel.js');
+    const [subs, dest] = await Promise.all([
+        Subscription.find({ userId: req.userId, region: req.region }).lean(),
+        Destination.findOne({ region: req.region }).select('_id').lean()
+    ]);
+    const on = new Map(subs.map((s) => [s.notificationType, s]));
+    return {
+        available: !!dest || !!process.env.DESTINATION_ID,
+        types: Object.entries(TYPES).map(([type, label]) => ({ type, label, on: on.has(type), lastEventAt: on.get(type)?.lastEventAt || null }))
+    };
+});
+
 module.exports = {
+    notificationSubscriptions,
     unshippedOrders, orderDetail,
     pendingReports,
     getCapabilities, getHistory, preview, approve, approveMany, getOne, cancel, approverOf,

@@ -265,6 +265,14 @@ async function start() {
         logger.error('[CronProducerStandalone] Amazon actions poller init failed', { error: error?.message });
     }
 
+    // Amazon event notifications from SellerQI's SQS queue (off until
+    // SP_NOTIFICATIONS_QUEUE_URL is set).
+    try {
+        require('./spNotificationsConsumer.js').start();
+    } catch (error) {
+        logger.error('[CronProducerStandalone] SP notifications consumer init failed', { error: error?.message });
+    }
+
     logger.info('[CronProducerStandalone] Started successfully — running all cron schedules');
 
     // Graceful shutdown: stop accepting new cron ticks, let in-flight work finish.

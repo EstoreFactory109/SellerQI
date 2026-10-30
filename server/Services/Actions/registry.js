@@ -22,7 +22,8 @@ for (const mod of [
     require('./handlers/listingsOffers.js'),
     require('./handlers/messaging.js'),
     require('./handlers/feeds.js'),
-    require('./handlers/orders.js')
+    require('./handlers/orders.js'),
+    require('./handlers/notifications.js')
 ]) {
     for (const handler of mod.handlers) {
         if (HANDLERS.has(handler.actionType)) throw new Error(`Duplicate action type ${handler.actionType}`);
