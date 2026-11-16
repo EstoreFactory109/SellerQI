@@ -21,6 +21,8 @@ const { enqueueScheduledAccountJob, getQueueStats } = require('./producer.js');
 const { UserSchedulingService } = require('./UserSchedulingService.js');
 const Seller = require('../../models/user-auth/sellerCentralModel.js');
 const logger = require('../../utils/Logger.js');
+const { classifyAccountCredentials } = require('./accountCredentials.js');
+const { credentialSkipModeFor, MODES: CREDENTIAL_MODES } = require('../../utils/credentialSkipGate.js');
 
 /**
  * Enqueue per-account phased scheduled jobs for users that need daily updates.
@@ -48,6 +50,9 @@ async function enqueueUsersForDailyUpdate() {
         let accountsFailed = 0;
         let accountsCapped = 0;
         let accountsAlreadyDone = 0;
+        // Under `on`: accounts not enqueued for lack of credentials. Under `dry_run`: accounts
+        // that would have been (they are still enqueued).
+        let accountsNoCredentials = 0;
 
         for (const schedule of usersNeedingUpdate) {
             // getUsersNeedingDailyUpdate now returns lean schedule docs (no populate),
@@ -94,6 +99,25 @@ async function enqueueUsersForDailyUpdate() {
                         logger.warn(
                             `[CronProducer] Eligibility gate failed for ${userId} ${account.country}-${account.region}, attempting anyway: ${gateError.message}`
                         );
+                    }
+
+                    // Credential gating: an account with neither a usable SP-API nor a usable
+                    // Ads credential fails every service in every phase and is never stamped
+                    // complete, so it would be re-run every tick up to the attempt cap. Not
+                    // enqueued (and no attempt recorded) under `on`; the check repeats each hour
+                    // from the Seller doc already loaded, so a seller who reconnects is picked up
+                    // the same day. `dry_run` logs the decision and enqueues as before.
+                    const credentials = classifyAccountCredentials(account);
+                    if (!credentials.runnable) {
+                        const mode = credentialSkipModeFor(userId);
+                        if (mode !== CREDENTIAL_MODES.OFF) {
+                            accountsNoCredentials++;
+                            logger.warn(
+                                `[CronProducer] ${mode === CREDENTIAL_MODES.ON ? 'Skipping' : '[dry_run] Would skip'} ${userId} ${account.country}-${account.region} — no usable Amazon credentials`,
+                                { sp: credentials.sp, ads: credentials.ads, mode }
+                            );
+                            if (mode === CREDENTIAL_MODES.ON) continue;
+                        }
                     }
 
                     try {
@@ -146,6 +170,7 @@ async function enqueueUsersForDailyUpdate() {
             accountsFailed,
             accountsCapped,
             accountsAlreadyDone,
+            accountsNoCredentials,
             queueStats
         });
 
@@ -157,6 +182,7 @@ async function enqueueUsersForDailyUpdate() {
             accountsFailed,
             accountsCapped,
             accountsAlreadyDone,
+            accountsNoCredentials,
             queueStats
         };
 

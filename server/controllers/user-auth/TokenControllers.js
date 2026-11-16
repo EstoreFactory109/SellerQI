@@ -7,6 +7,7 @@ const asyncHandler = require('../../utils/AsyncHandler');
 const { createLocationToken } = require('../../utils/Tokens.js');
 const logger = require('../../utils/Logger.js');
 const { UserSchedulingService } = require('../../Services/BackgroundJobs/UserSchedulingService.js');
+const { clearRevocation } = require('../../Services/BackgroundJobs/accountCredentials.js');
 const { v4: uuidv4 } = require('uuid');
 const { getHttpCookieOptions } = require('../../utils/cookieConfig.js');
 const {
@@ -284,6 +285,8 @@ const generateSPAPITokens = asyncHandler(async (req, res) => {
         // Store the refresh token in the seller account
         sellerAccount.spiRefreshToken = refreshToken;
         sellerAccount.selling_partner_id = sellingPartnerId;
+        // A new grant supersedes any recorded revocation of the old one.
+        clearRevocation(sellerAccount, 'sp');
 
         await sellerCentral.save();
 
@@ -343,6 +346,7 @@ const generateAmazonAdsTokens = asyncHandler(async (req, res) => {
 
         // Store the refresh token in the seller account
         sellerAccount.adsRefreshToken = refreshToken;
+        clearRevocation(sellerAccount, 'ads');
 
         await sellerCentral.save();
         return res.status(200).json(new ApiResponse(200, sellerAccount, "Amazon Ads tokens generated successfully"));
@@ -416,6 +420,7 @@ const generateAdsTokensForClient = asyncHandler(async (req, res) => {
         }
 
         sellerAccount.adsRefreshToken = tokenData.refreshToken;
+        clearRevocation(sellerAccount, 'ads');
         await sellerCentral.save();
 
         logger.info(`Agency ${agencyOwnerId} connected Ads for client ${clientId} (${country}/${region})`);

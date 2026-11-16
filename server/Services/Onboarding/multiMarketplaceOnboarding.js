@@ -23,6 +23,7 @@ const { getProfileById } = require('../AmazonAds/GenerateProfileId.js');
 const { getMarketplaceParticipations, supportedParticipations } = require('../Sp_API/MarketplaceParticipations.js');
 const { addIntegrationJob, getAggregatedJobStatus } = require('../BackgroundJobs/integrationQueue.js');
 const { UserSchedulingService } = require('../BackgroundJobs/UserSchedulingService.js');
+const { REVOCATION_FIELDS } = require('../BackgroundJobs/accountCredentials.js');
 const { REGIONS, isRegion, regionOf, countriesInRegion, fromAmazonCountryCode } = require('./marketplaces.js');
 const { ApiError } = require('../../utils/ApiError.js');
 const logger = require('../../utils/Logger.js');
@@ -72,9 +73,13 @@ const upsertMarketplace = async (sellerId, country, region, fields) => {
     );
     const set = {};
     for (const [key, value] of Object.entries(fields)) set[`sellerAccount.$[acct].${key}`] = value;
+    // A new refresh token supersedes any recorded revocation of the old one.
+    const unset = {};
+    if (fields.spiRefreshToken) for (const f of REVOCATION_FIELDS.sp) unset[`sellerAccount.$[acct].${f}`] = '';
+    if (fields.adsRefreshToken) for (const f of REVOCATION_FIELDS.ads) unset[`sellerAccount.$[acct].${f}`] = '';
     await Seller.updateOne(
         { _id: sellerId },
-        { $set: set },
+        Object.keys(unset).length ? { $set: set, $unset: unset } : { $set: set },
         { arrayFilters: [{ 'acct.country': country, 'acct.region': region }] }
     );
 };

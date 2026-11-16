@@ -286,7 +286,12 @@ const generateAccessToken=async(userId,refreshToken,errorRef=null)=>{
                 authCache.invalidateToken('sp', refreshToken).catch(() => {});
             }
 
-            if (errorRef) errorRef.message = errorDescription || errorCode || `Amazon API error ${status}`;
+            if (errorRef) {
+                errorRef.message = errorDescription || errorCode || `Amazon API error ${status}`;
+                // The machine-readable code, so callers can tell a revoked grant from a
+                // transient failure without matching on Amazon's description text.
+                errorRef.code = errorCode || null;
+            }
         } else {
             logger.error(`Error generating access token: ${error.message}`, {
                 userId,

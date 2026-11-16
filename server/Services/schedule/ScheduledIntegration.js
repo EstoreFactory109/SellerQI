@@ -37,6 +37,7 @@ const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventorySto
 // Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
 const dashboardSliceService = require('../dashboard/DashboardSliceService.js');
 const { financeAsyncEnabledFor, adsAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
+const { credentialSkipModeFor, MODES: CREDENTIAL_MODES } = require('../../utils/credentialSkipGate.js');
 const { marketplaceTodayStr, marketplaceYesterdayStr, addDaysToDateStr } = require('../../utils/marketplaceTimezone.js');
 
 // How many days (ending yesterday) the daily ads phase re-fetches. Amazon attributes SB/SD
@@ -657,6 +658,12 @@ class ScheduledIntegration {
             });
         }
 
+        // Per-credential outcome for the caller to persist (see _recordCredentialRevocation):
+        // `*Revoked` is Amazon's reason ONLY when it answered `invalid_grant` — a timeout or 5xx
+        // is transient and must never mark a grant revoked. `*Ok` means a token was obtained.
+        // Returned on both the success and the failure path.
+        const revocation = { spOk: false, adsOk: false, spRevoked: null, adsRevoked: null };
+
         try {
             const tokenPromises = [];
             const tokenTypes = [];
@@ -706,6 +713,10 @@ class ScheduledIntegration {
             if (AdsRefreshToken) {
                 if (tokenResults[tokenIndex].status === 'rejected') {
                     logger.warn(`Amazon Ads token generation failed: ${tokenResults[tokenIndex].reason}`);
+                    const adsReason = tokenResults[tokenIndex].reason;
+                    if (adsReason?.code === 'invalid_grant') {
+                        revocation.adsRevoked = String(adsReason.message || 'invalid_grant');
+                    }
                 } else {
                     AdsAccessToken = tokenResults[tokenIndex].value;
                     if (!AdsAccessToken) {
@@ -713,6 +724,12 @@ class ScheduledIntegration {
                         AdsAccessToken = null;
                     }
                 }
+            }
+
+            revocation.spOk = !!AccessToken;
+            revocation.adsOk = !!AdsAccessToken;
+            if (RefreshToken && !AccessToken && spapiErr.code === 'invalid_grant') {
+                revocation.spRevoked = String(spapiErr.message || 'invalid_grant');
             }
 
             // Surface auth failures explicitly on the logging page. A refresh
@@ -748,7 +765,7 @@ class ScheduledIntegration {
                 });
             }
 
-            return { success: true, AccessToken, AdsAccessToken };
+            return { success: true, AccessToken, AdsAccessToken, revocation };
 
         } catch (tokenError) {
             logger.error("Failed to generate any access tokens", {
@@ -758,7 +775,57 @@ class ScheduledIntegration {
             if (loggingHelper) {
                 loggingHelper.logFunctionError('generateAccessTokens', tokenError);
             }
-            return { success: false, statusCode: 500, error: `Token generation failed: ${tokenError.message}` };
+            return { success: false, statusCode: 500, error: `Token generation failed: ${tokenError.message}`, revocation };
+        }
+    }
+
+    /**
+     * Persist the outcome of a run's token exchange on the sellerAccount entry, so the producer
+     * can stop enqueueing an account whose grant Amazon has revoked (accountCredentials.js).
+     *
+     *   revoked (`invalid_grant`)  → $set *AuthRevokedAt / *AuthRevokedReason
+     *   token obtained             → $unset them (the seller reconnected, or it was a one-off)
+     *   anything else              → untouched: a timeout or 5xx says nothing about the grant
+     *
+     * Runs in every CREDENTIAL_SKIP_MODE — only ACTING on the fields is gated — so the data is
+     * already there when the gate is turned on. The $unset is filtered to entries that carry the
+     * field, so the common case (healthy account, nothing to clear) matches nothing and writes
+     * nothing. Non-fatal: a failed write must never fail the phase.
+     *
+     * @param {object} revocation  generateTokens' `revocation` ({spOk, adsOk, spRevoked, adsRevoked})
+     */
+    static async _recordCredentialRevocation(userId, Country, Region, revocation) {
+        if (!revocation) return;
+        const arrayFilters = (field) => [{ 'acct.country': Country, 'acct.region': Region, ...(field ? { [`acct.${field}`]: { $exists: true } } : {}) }];
+        const writes = [];
+
+        const plan = [
+            { ok: revocation.spOk, revoked: revocation.spRevoked, at: 'spiAuthRevokedAt', why: 'spiAuthRevokedReason', label: 'SP-API' },
+            { ok: revocation.adsOk, revoked: revocation.adsRevoked, at: 'adsAuthRevokedAt', why: 'adsAuthRevokedReason', label: 'Ads' },
+        ];
+        for (const p of plan) {
+            if (p.revoked) {
+                logger.warn(`[ScheduledIntegration] ${p.label} grant revoked for ${userId} ${Country}-${Region} — recording it; the seller must reconnect`, { reason: p.revoked });
+                writes.push(Seller.updateOne(
+                    { User: userId },
+                    { $set: { [`sellerAccount.$[acct].${p.at}`]: new Date(), [`sellerAccount.$[acct].${p.why}`]: String(p.revoked).slice(0, 500) } },
+                    { arrayFilters: arrayFilters(null) }
+                ));
+            } else if (p.ok) {
+                writes.push(Seller.updateOne(
+                    { User: userId, sellerAccount: { $elemMatch: { country: Country, region: Region, [p.at]: { $exists: true } } } },
+                    { $unset: { [`sellerAccount.$[acct].${p.at}`]: '', [`sellerAccount.$[acct].${p.why}`]: '' } },
+                    { arrayFilters: arrayFilters(p.at) }
+                ));
+            }
+        }
+        if (!writes.length) return;
+
+        const results = await Promise.allSettled(writes);
+        for (const r of results) {
+            if (r.status === 'rejected') {
+                logger.warn(`[ScheduledIntegration] Could not record credential state for ${userId} ${Country}-${Region} (non-fatal): ${r.reason?.message || r.reason}`);
+            }
         }
     }
 
@@ -953,6 +1020,24 @@ class ScheduledIntegration {
         const excludeSet = new Set(_excludeFunctions || []);
 
         const apiData = {};
+
+        // The result recorded for a token-gated service whose token is null. Under
+        // CREDENTIAL_SKIP_MODE=on, a token that is null because the seller NEVER CONNECTED that
+        // API (no refresh token stored — or, for Ads, no ProfileId, which getSellerDataAndTokens
+        // already folds into a null AdsRefreshToken) is `skipped`, which finalize and
+        // _canMarkDailyComplete then leave out. A token that is null because the exchange failed
+        // stays a failure: it may be transient, and a revoked grant is recorded separately.
+        // `success:false` is kept on the skipped shape so every older reader stays correct.
+        // Under `dry_run` the result is the legacy failure, tagged `wouldSkip` so finalize can
+        // log what `on` would have decided without changing anything.
+        const credentialMode = credentialSkipModeFor(userId);
+        const missingTokenResult = (error, notConnected, reason) => {
+            if (!notConnected || credentialMode === CREDENTIAL_MODES.OFF) return { success: false, data: null, error };
+            if (credentialMode === CREDENTIAL_MODES.ON) return { success: false, skipped: true, reason, data: null, error };
+            return { success: false, wouldSkip: true, reason, data: null, error };
+        };
+        const spNotConnected = !RefreshToken;
+        const adsNotConnected = !AdsRefreshToken;
 
         // Ads date window. ADS ONLY — used at the serviceFunction call sites below. Amazon Ads
         // buckets report rows by the marketplace's local day (Pacific for NA), so "yesterday"
@@ -1240,19 +1325,19 @@ class ScheduledIntegration {
             // Check token requirements
             if (requiresAccessToken && !AccessToken) {
                 logger.info(`Skipping ${description} - AccessToken not available`);
-                apiData[dataKey] = { success: false, data: null, error: "SP-API token not available" };
+                apiData[dataKey] = missingTokenResult("SP-API token not available", spNotConnected, 'sp_not_connected');
                 continue;
             }
 
             if (requiresAdsToken && !AdsAccessToken) {
                 logger.info(`Skipping ${description} - AdsAccessToken not available`);
-                apiData[dataKey] = { success: false, data: null, error: "Ads token not available" };
+                apiData[dataKey] = missingTokenResult("Ads token not available", adsNotConnected, 'ads_not_connected');
                 continue;
             }
 
             if (requiresRefreshToken && !RefreshToken) {
                 logger.info(`Skipping ${description} - RefreshToken not available`);
-                apiData[dataKey] = { success: false, data: null, error: "Refresh token not available" };
+                apiData[dataKey] = missingTokenResult("Refresh token not available", spNotConnected, 'sp_not_connected');
                 continue;
             }
 
@@ -1591,13 +1676,13 @@ class ScheduledIntegration {
             if (scheduledFunctions['v2data'] && AccessToken) {
                 apiData.v2data = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1] || 'V2 Seller Performance Report');
             } else if (scheduledFunctions['v2data']) {
-                apiData.v2data = { success: false, data: null, error: "SP-API token not available" };
+                apiData.v2data = missingTokenResult("SP-API token not available", spNotConnected, 'sp_not_connected');
             }
             
             if (scheduledFunctions['v1data'] && AccessToken) {
                 apiData.v1data = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1] || 'V1 Seller Performance Report');
             } else if (scheduledFunctions['v1data']) {
-                apiData.v1data = { success: false, data: null, error: "SP-API token not available" };
+                apiData.v1data = missingTokenResult("SP-API token not available", spNotConnected, 'sp_not_connected');
             }
 
             // NOTE: the four ads services (ppcSpendsBySKU, adsKeywordsPerformanceData,
@@ -2451,7 +2536,18 @@ class ScheduledIntegration {
         for (const [key, value] of Object.entries(apiData)) {
             if (!value || typeof value !== 'object' || Array.isArray(value) || !('success' in value)) continue;
             try {
-                if (value.success === false) {
+                if (value.skipped === true) {
+                    // Not connected (CREDENTIAL_SKIP_MODE=on): nothing was attempted, so this is
+                    // not a failure. The schema's `skipped` status is counted separately by
+                    // UserAccountLogs.updateSummary.
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: key,
+                        logType: 'info',
+                        status: 'skipped',
+                        message: `${key} skipped: ${value.error || value.reason || 'not connected'}`,
+                        contextData
+                    });
+                } else if (value.success === false) {
                     await LoggingHelper.addLogToSession(sessionId, {
                         functionName: key,
                         logType: 'error',
@@ -2507,6 +2603,9 @@ class ScheduledIntegration {
             if (!credentialsResult.success) return { success: false, error: credentialsResult.error, statusCode: credentialsResult.statusCode };
 
             const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, loggingHelper);
+            // Once per run, here only: batch phases re-run the exchange (mostly cache hits) and
+            // would only repeat the same write.
+            await this._recordCredentialRevocation(userId, Country, Region, tokenResult.revocation);
             if (!tokenResult.success) return { success: false, error: tokenResult.error, statusCode: tokenResult.statusCode };
             const { AccessToken, AdsAccessToken } = tokenResult;
 
@@ -4258,10 +4357,15 @@ class ScheduledIntegration {
     }
 
     static _canMarkDailyComplete(apiResults) {
-        const financeOk = !!(apiResults?.financeSync?.success);
+        // A `skipped` result (CREDENTIAL_SKIP_MODE=on: the seller never connected that API) is
+        // not a failure to retry — no retry can change it. Finance skipped counts as done, and a
+        // skipped ads service does not count as "ran". Before this, an account with no Ads
+        // connection carried four `success:false` ads keys, so adsRan was true, the day was never
+        // stamped, and the account was re-run every tick up to the daily attempt cap.
+        const financeOk = !!(apiResults?.financeSync?.success || apiResults?.financeSync?.skipped === true);
         const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
         const anyAdsOk = adsServiceKeys.some(k => apiResults?.[k]?.success === true);
-        const adsRan = adsServiceKeys.some(k => apiResults?.[k] && typeof apiResults[k] === 'object' && 'success' in apiResults[k]);
+        const adsRan = adsServiceKeys.some(k => apiResults?.[k] && typeof apiResults[k] === 'object' && 'success' in apiResults[k] && apiResults[k].skipped !== true);
         const adsDataLoss = adsServiceKeys.some(k => apiResults?.[k]?.dataLoss === true);
         // Treat ads as "ok" when no ads service ran at all (e.g. user has no ads connection) — we only
         // block on ads failures that actually surfaced from an attempted fetch.
@@ -4282,8 +4386,12 @@ class ScheduledIntegration {
             // Build a summary from accumulated apiResults across all phases (used by both modes)
             const successful = [];
             const failed = [];
+            const skipped = [];
             for (const [key, result] of Object.entries(apiResults)) {
                 if (result.success) { successful.push(key); }
+                // Never attempted (seller not connected; CREDENTIAL_SKIP_MODE=on). Left out of the
+                // total too, so a run whose every ATTEMPTED service succeeded closes `completed`.
+                else if (result.skipped === true) { skipped.push(key); }
                 else { failed.push({ service: key, error: result.error || 'Unknown error' }); }
             }
             const totalServices = successful.length + failed.length;
@@ -4291,7 +4399,7 @@ class ScheduledIntegration {
             const successPercentage = totalServices > 0 ? Math.round((successful.length / totalServices) * 100) : 0;
 
             logger.info(`[ScheduledIntegration:FinalizePhase] Service summary`, {
-                totalServices, successful: successful.length, failed: failed.length, successPercentage: `${successPercentage}%`
+                totalServices, successful: successful.length, failed: failed.length, skipped: skipped.length, successPercentage: `${successPercentage}%`
             });
 
             // Complete DataFetchTracking (mode-agnostic — same in both paths)
@@ -4424,6 +4532,21 @@ class ScheduledIntegration {
                     userId, country: Country, region: Region,
                     financeOk: gate.financeOk, anyAdsOk: gate.anyAdsOk, adsRan: gate.adsRan,
                     adsDataLoss: gate.adsDataLoss,
+                });
+            }
+
+            // CREDENTIAL_SKIP_MODE=dry_run: what `on` would have decided for this run. Counted
+            // in production before the gate acts; changes nothing.
+            const wouldSkipped = Object.entries(apiResults).filter(([, r]) => r && r.wouldSkip === true).map(([k]) => k);
+            if (wouldSkipped.length > 0) {
+                const asOn = {};
+                for (const [k, r] of Object.entries(apiResults)) asOn[k] = r && r.wouldSkip === true ? { ...r, skipped: true } : r;
+                const wouldGate = this._canMarkDailyComplete(asOn);
+                logger.info(`[ScheduledIntegration:FinalizePhase] [credential dry_run] ${userId} ${Country}-${Region}`, {
+                    wouldSkipCount: wouldSkipped.length,
+                    wouldSkipped,
+                    stampsCompleteNow: gate.canMarkComplete,
+                    wouldStampComplete: wouldGate.canMarkComplete,
                 });
             }
 

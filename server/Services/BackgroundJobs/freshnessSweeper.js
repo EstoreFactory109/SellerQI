@@ -38,6 +38,8 @@ const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const { getQueue } = require('./queue.js');
 const scheduledPhases = require('./scheduledPhases.js');
 const logger = require('../../utils/Logger.js');
+const { classifyAccountCredentials, STATES: CREDENTIAL_STATES } = require('./accountCredentials.js');
+const { credentialSkipModeFor, MODES: CREDENTIAL_MODES } = require('../../utils/credentialSkipGate.js');
 const { marketplaceTodayStr, marketplaceYesterdayStr, addDaysToDateStr } = require('../../utils/marketplaceTimezone.js');
 
 // How far back to scan for missing days.
@@ -396,7 +398,12 @@ async function sweep() {
             'sellerAccount.region': 1,
             'sellerAccount.spiRefreshToken': 1,
             'sellerAccount.adsRefreshToken': 1,
-            'sellerAccount.lastDeepResyncAt': 1
+            'sellerAccount.lastDeepResyncAt': 1,
+            // Read by classifyAccountCredentials — without ProfileId every Ads account
+            // would classify as not connected.
+            'sellerAccount.ProfileId': 1,
+            'sellerAccount.spiAuthRevokedAt': 1,
+            'sellerAccount.adsAuthRevokedAt': 1
         }
     ).lean();
 
@@ -414,6 +421,10 @@ async function sweep() {
         for (const acct of seller.sellerAccount) {
             if (!acct || !acct.country || !acct.region) continue;
             if (!acct.adsRefreshToken) continue;
+            // A revoked Ads grant (or no ProfileId) can never fill a missing day. Acted on
+            // only under `on`; `off` keeps the presence-only check above.
+            if (credentialSkipModeFor(seller.User) === CREDENTIAL_MODES.ON
+                && classifyAccountCredentials(acct).ads !== CREDENTIAL_STATES.CONNECTED) continue;
 
             const country = acct.country.toUpperCase();
             const region = acct.region.toUpperCase();
@@ -650,7 +661,12 @@ async function sweepFinance() {
             'sellerAccount.region': 1,
             'sellerAccount.spiRefreshToken': 1,
             'sellerAccount.adsRefreshToken': 1,
-            'sellerAccount.lastDeepResyncAt': 1
+            'sellerAccount.lastDeepResyncAt': 1,
+            // Read by classifyAccountCredentials — without ProfileId every Ads account
+            // would classify as not connected.
+            'sellerAccount.ProfileId': 1,
+            'sellerAccount.spiAuthRevokedAt': 1,
+            'sellerAccount.adsAuthRevokedAt': 1
         }
     ).lean();
 
@@ -774,7 +790,12 @@ async function sweepFinanceDeepResync() {
             'sellerAccount.region': 1,
             'sellerAccount.spiRefreshToken': 1,
             'sellerAccount.adsRefreshToken': 1,
-            'sellerAccount.lastDeepResyncAt': 1
+            'sellerAccount.lastDeepResyncAt': 1,
+            // Read by classifyAccountCredentials — without ProfileId every Ads account
+            // would classify as not connected.
+            'sellerAccount.ProfileId': 1,
+            'sellerAccount.spiAuthRevokedAt': 1,
+            'sellerAccount.adsAuthRevokedAt': 1
         }
     ).lean();
 
@@ -791,6 +812,9 @@ async function sweepFinanceDeepResync() {
         if (activeSet && !activeSet.has(seller.User?.toString())) continue;
         for (const acct of seller.sellerAccount) {
             if (!acct || !acct.country || !acct.region || !acct.spiRefreshToken) continue;
+            // Same rule for a revoked SP-API grant; acted on only under `on`.
+            if (credentialSkipModeFor(seller.User) === CREDENTIAL_MODES.ON
+                && classifyAccountCredentials(acct).sp !== CREDENTIAL_STATES.CONNECTED) continue;
             eligible.push({
                 sellerId: seller._id,
                 user: seller.User,
@@ -1066,7 +1090,7 @@ async function sweepStalledPipelines() {
     const summary = {
         enabled: true, scanned: 0, frozen: 0, recovered: 0, blocked: 0,
         skippedInactive: 0, skippedDone: 0, skippedCapped: 0, skippedLive: 0,
-        cappedByTick: false, errors: 0,
+        skippedNoCredentials: 0, cappedByTick: false, errors: 0,
     };
     if (!PIPELINE_STALL_SWEEP_ENABLED) return { ...summary, enabled: false };
 
@@ -1122,6 +1146,43 @@ async function sweepStalledPipelines() {
                 else if (gate.reason === 'capped') summary.skippedCapped++;
                 else summary.skippedInactive++;
                 continue;
+            }
+
+            // Same credential rule as the producer: re-driving an account with no usable
+            // credential only reproduces the failure. Under `on` the stuck docs are closed
+            // (CAS, as below) rather than left for every tick to rescan; the Seller read only
+            // happens when the gate is not `off`, so the default path is unchanged.
+            const credentialMode = credentialSkipModeFor(userId);
+            if (credentialMode !== CREDENTIAL_MODES.OFF) {
+                const sellerDoc = await Seller.findOne({ User: cand._id.User })
+                    .select('sellerAccount.country sellerAccount.region sellerAccount.spiRefreshToken sellerAccount.adsRefreshToken sellerAccount.ProfileId sellerAccount.spiAuthRevokedAt sellerAccount.adsAuthRevokedAt')
+                    .lean();
+                const acct = (sellerDoc?.sellerAccount || []).find(
+                    (a) => String(a?.country || '').toUpperCase() === String(country).toUpperCase()
+                        && String(a?.region || '').toUpperCase() === String(region).toUpperCase()
+                );
+                const credentials = classifyAccountCredentials(acct);
+                if (!credentials.runnable) {
+                    summary.skippedNoCredentials++;
+                    logger.warn(
+                        `[FreshnessSweeper] ${credentialMode === CREDENTIAL_MODES.ON ? 'Not re-driving' : '[dry_run] Would not re-drive'} ${userId} ${country}-${region} — no usable Amazon credentials`,
+                        { sp: credentials.sp, ads: credentials.ads }
+                    );
+                    if (credentialMode === CREDENTIAL_MODES.ON) {
+                        await DataFetchTracking.updateMany(
+                            { _id: { $in: cand.ids }, status: 'started' },
+                            {
+                                $set: {
+                                    status: 'failed',
+                                    errorMessage: 'no-usable-credentials',
+                                    autoClosedStale: true,
+                                    autoClosedAt: new Date(),
+                                },
+                            }
+                        );
+                        continue;
+                    }
+                }
             }
 
             // Liveness. JobStatus rows are UPSERTED under a deterministic jobId
