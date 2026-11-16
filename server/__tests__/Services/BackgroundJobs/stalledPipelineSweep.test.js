@@ -33,7 +33,8 @@ jest.mock('../../../models/system/JobStatusModel.js', () => ({
 
 const mockUserFind = jest.fn();
 jest.mock('../../../models/user-auth/userModel.js', () => ({ find: (...a) => mockUserFind(...a) }));
-jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({ find: jest.fn(), findOne: jest.fn() }));
+const mockSellerFindOne = jest.fn();
+jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({ find: jest.fn(), findOne: (...a) => mockSellerFindOne(...a) }));
 jest.mock('../../../models/amazon-ads/PPCMetricsModel.js', () => ({}));
 jest.mock('../../../models/finance/FinanceSyncLogModel.js', () => ({}));
 jest.mock('../../../models/finance/DailySkuFinanceModel.js', () => ({}));
@@ -79,6 +80,68 @@ beforeEach(() => {
     mockShouldAttempt.mockResolvedValue({ eligible: true });
     mockEnqueue.mockResolvedValue({ success: true, jobId: 'j1' });
     mockGetJob.mockResolvedValue({ timestamp: Date.now() });
+    // Every marketplace the tests use is connected, so the credential check (on by default)
+    // lets the re-drive through.
+    const connected = (country, region) => ({ country, region, spiRefreshToken: 'Atzr|sp' });
+    mockSellerFindOne.mockReturnValue(chain({
+        sellerAccount: [
+            connected('US', 'NA'),
+            connected('UK', 'EU'),
+            ...Array.from({ length: 9 }, (_, i) => connected('US', `R${i}`)),
+        ],
+    }));
+});
+
+describe('credential gating (CREDENTIAL_SKIP_MODE)', () => {
+    const ORIGINAL = process.env.CREDENTIAL_SKIP_MODE;
+    afterEach(() => {
+        if (ORIGINAL === undefined) delete process.env.CREDENTIAL_SKIP_MODE;
+        else process.env.CREDENTIAL_SKIP_MODE = ORIGINAL;
+    });
+
+    test('default (on): an account with no usable credential is not re-driven; its stuck docs are closed', async () => {
+        delete process.env.CREDENTIAL_SKIP_MODE;
+        mockSellerFindOne.mockReturnValue(chain({ sellerAccount: [{ country: 'US', region: 'NA' }] }));
+
+        const res = await sweepStalledPipelines();
+
+        expect(mockEnqueue).not.toHaveBeenCalled();
+        expect(res.skippedNoCredentials).toBe(1);
+        expect(mockUpdateMany).toHaveBeenCalledWith(
+            { _id: { $in: ['doc1'] }, status: 'started' },
+            { $set: expect.objectContaining({ status: 'failed', errorMessage: 'no-usable-credentials' }) }
+        );
+    });
+
+    test('a revoked grant counts as no usable credential', async () => {
+        delete process.env.CREDENTIAL_SKIP_MODE;
+        mockSellerFindOne.mockReturnValue(chain({ sellerAccount: [{ country: 'US', region: 'NA', spiRefreshToken: 'Atzr|sp', spiAuthRevokedAt: new Date() }] }));
+
+        await sweepStalledPipelines();
+
+        expect(mockEnqueue).not.toHaveBeenCalled();
+    });
+
+    test('off: the account is re-driven as before, and no Seller read happens', async () => {
+        process.env.CREDENTIAL_SKIP_MODE = 'off';
+        mockSellerFindOne.mockReturnValue(chain({ sellerAccount: [{ country: 'US', region: 'NA' }] }));
+
+        const res = await sweepStalledPipelines();
+
+        expect(mockSellerFindOne).not.toHaveBeenCalled();
+        expect(mockEnqueue).toHaveBeenCalledWith(USER, 'US', 'NA');
+        expect(res.recovered).toBe(1);
+    });
+
+    test('dry_run: logs but still re-drives', async () => {
+        process.env.CREDENTIAL_SKIP_MODE = 'dry_run';
+        mockSellerFindOne.mockReturnValue(chain({ sellerAccount: [{ country: 'US', region: 'NA' }] }));
+
+        const res = await sweepStalledPipelines();
+
+        expect(res.skippedNoCredentials).toBe(1);
+        expect(mockEnqueue).toHaveBeenCalledWith(USER, 'US', 'NA');
+    });
 });
 
 describe('detection', () => {

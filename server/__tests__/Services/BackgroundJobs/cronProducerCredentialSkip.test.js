@@ -58,14 +58,25 @@ afterEach(() => {
 });
 
 describe('enqueueUsersForDailyUpdate — credential gating', () => {
-    test('off (default): every account is enqueued, as before', async () => {
-        delete process.env.CREDENTIAL_SKIP_MODE;
+    test('off (kill switch): every account is enqueued, as before', async () => {
+        process.env.CREDENTIAL_SKIP_MODE = 'off';
         setup([HEALTHY, ADS_ONLY, NOTHING, REVOKED]);
 
         const res = await enqueueUsersForDailyUpdate();
 
         expect(enqueuedCountries()).toEqual(['US', 'CA', 'UK', 'DE']);
         expect(res.accountsNoCredentials).toBe(0);
+    });
+
+    test('unset: on by default — accounts with no usable credential are not enqueued', async () => {
+        delete process.env.CREDENTIAL_SKIP_MODE;
+        delete process.env.CREDENTIAL_SKIP_USER_IDS;
+        setup([HEALTHY, ADS_ONLY, NOTHING, REVOKED]);
+
+        const res = await enqueueUsersForDailyUpdate();
+
+        expect(enqueuedCountries()).toEqual(['US', 'CA']);
+        expect(res.accountsNoCredentials).toBe(2);
     });
 
     test('dry_run: counts the accounts it would skip but still enqueues them', async () => {
