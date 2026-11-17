@@ -3563,15 +3563,28 @@ class ScheduledIntegration {
                 userId, country: Country, regionModel: Region, tokenManager, chunk,
             });
 
-            // First time THIS run reaches this chunk: a FAILED row for the same key can only be
-            // left over from an earlier run today. Reused as-is, it made no new Amazon attempt yet
-            // still added a failure to the date's retry count on every hourly retry — burning the
-            // cap ~4x faster and leaving chunks capped with estimated fees. Clear it so the engine
-            // resubmits: a real retry, as the inline path makes on every run.
+            // First time THIS run reaches this chunk: clear ANY row already stored under the same
+            // key, whatever its status, so the engine submits a fresh report — exactly what the
+            // inline path does on every run. The key (group + runDate=chunk.endDate + paramsKey) is
+            // a DATA range, not a run, so earlier runs leave rows that collide with this one:
+            //
+            //   • DONE — the engine treats an existing terminal row as already finished and neither
+            //     submits nor writes anything. Re-checks of old days were therefore silent no-ops.
+            //     Chunks are cut on a 3-day grid from the window start, and the window moves one day
+            //     a day, so the same keys recur: on account 6a57b823571ceb9266953c30 the 30-day deep
+            //     re-sync fetched only its newest chunk every day for weeks, every older chunk
+            //     matching a DONE row from the daily catch-up. 17 Oct–2 Nov stayed as first written
+            //     and read 1.4–3.4% above Data Kiosk (cancellations never picked up). The daily
+            //     14-day re-check (resyncDays) has the same exposure.
+            //   • FAILED — reused as-is, it made no new Amazon attempt yet still added a failure to
+            //     the date's retry count on every hourly retry, burning the cap ~4x faster.
+            //
+            // Later ticks of the same chunk in this run skip this (financeStartedChunks), so the
+            // run's own report is never thrown away mid-poll.
             const startedChunks = phaseData.financeStartedChunks || [];
             if (!startedChunks.includes(paramsKey)) {
-                await AsyncReportRequest.deleteOne({
-                    userId: String(userId), country: Country, region: Region, runDate, group, phase: 'finance', paramsKey, status: 'FAILED',
+                await AsyncReportRequest.deleteMany({
+                    userId: String(userId), country: Country, region: Region, runDate, group, phase: 'finance', paramsKey,
                 });
             }
 

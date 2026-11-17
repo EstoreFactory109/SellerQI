@@ -39,9 +39,11 @@ jest.mock('../../../Services/AmazonAds/asyncReportEngine.js', () => ({
 
 let mockEngineRows = [];
 const mockDeleteOne = jest.fn();
+const mockDeleteMany = jest.fn();
 jest.mock('../../../models/amazon-ads/AsyncReportRequestModel.js', () => ({
     find: () => ({ lean: async () => mockEngineRows }),
     deleteOne: (...a) => mockDeleteOne(...a),
+    deleteMany: (...a) => mockDeleteMany(...a),
 }));
 
 jest.mock('../../../models/finance/FinanceSyncLogModel.js', () => ({}));
@@ -102,6 +104,7 @@ beforeEach(() => {
     mockEngineRows = [];
     mockRunAsyncAdsReports.mockReset();
     mockDeleteOne.mockReset().mockResolvedValue({});
+    mockDeleteMany.mockReset().mockResolvedValue({});
     mockPlanFinanceSync.mockReset().mockResolvedValue({ window: WINDOW, chunks: CHUNKS, latestSyncDate: '2026-06-30' });
     mockRunFinanceSyncTail.mockReset().mockResolvedValue({ resolved: 5, stillPending: 0, expired: 0 });
     mockRecordSyncFailure.mockReset().mockResolvedValue(undefined);
@@ -308,9 +311,9 @@ describe('_runAsyncFinancePhase — the chunk walk', () => {
     });
 });
 
-// The empty-report re-submit deletes the NO_DATA row; the first-tick clean-up of a leftover FAILED
-// row is a separate deleteOne (filtered on status FAILED). These tests are about the former.
-const emptyRetryDeletes = () => mockDeleteOne.mock.calls.filter(([filter]) => filter?.status !== 'FAILED');
+// The empty-report re-submit deletes the NO_DATA row with deleteOne; the first-tick clean-up of a
+// leftover row from an earlier run is a separate deleteMany. These tests are about the former.
+const emptyRetryDeletes = () => mockDeleteOne.mock.calls;
 
 describe('_runAsyncFinancePhase — the empty-report retry is bounded', () => {
     const recentChunks = [{ startDate: new Date(Date.now() - 3 * 86400000).toISOString().substring(0, 10), endDate: new Date(Date.now() - 1 * 86400000).toISOString().substring(0, 10) }];
@@ -369,20 +372,33 @@ describe('_runAsyncFinancePhase — the empty-report retry is bounded', () => {
     });
 });
 
-describe('_runAsyncFinancePhase — a FAILED chunk from an earlier run today is retried for real', () => {
+describe('_runAsyncFinancePhase — every run fetches each chunk fresh, like the inline path', () => {
     const KEY0 = `${CHUNKS[0].startDate}_${CHUNKS[0].endDate}`;
-    const failedCleanups = () => mockDeleteOne.mock.calls.filter(([filter]) => filter?.status === 'FAILED');
+    const failedCleanups = () => mockDeleteMany.mock.calls;
 
-    test('the first tick of a chunk clears a leftover FAILED row so the engine resubmits', async () => {
+    test('the first tick of a chunk clears any leftover row for its key — whatever the status — so the engine resubmits', async () => {
         mockRunAsyncAdsReports.mockResolvedValue({ done: false, reschedule: { delayMs: 300000, pollAttempt: 1 } });
 
         const res = await SI._runAsyncFinancePhase({ userId: USER, Region: REGION, Country: COUNTRY, phaseData: {} });
 
         expect(failedCleanups()).toHaveLength(1);
-        expect(failedCleanups()[0][0]).toMatchObject({ paramsKey: KEY0, runDate: CHUNKS[0].endDate, group: 'sched_finance', phase: 'finance', status: 'FAILED' });
+        const filter = failedCleanups()[0][0];
+        expect(filter).toMatchObject({ paramsKey: KEY0, runDate: CHUNKS[0].endDate, group: 'sched_finance', phase: 'finance' });
+        // No status filter: an old DONE row is the case that silently blocked every re-check of
+        // old days (the engine reads an existing DONE row as finished and fetches nothing).
+        expect(filter).not.toHaveProperty('status');
         // Clean-up happens before the engine is asked to submit.
-        expect(mockDeleteOne.mock.invocationCallOrder[0]).toBeLessThan(mockRunAsyncAdsReports.mock.invocationCallOrder[0]);
+        expect(mockDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(mockRunAsyncAdsReports.mock.invocationCallOrder[0]);
         expect(res.dataForNextPhase.financeStartedChunks).toEqual([KEY0]);
+    });
+
+    test('the catch-up / deep re-sync group clears its own leftover rows too', async () => {
+        mockRunAsyncAdsReports.mockResolvedValue({ done: false, reschedule: { delayMs: 300000, pollAttempt: 1 } });
+
+        await SI._runAsyncFinancePhase({ userId: USER, Region: REGION, Country: COUNTRY, phaseData: {}, group: 'sched_finance_catchup' });
+
+        expect(failedCleanups()).toHaveLength(1);
+        expect(failedCleanups()[0][0]).toMatchObject({ paramsKey: KEY0, group: 'sched_finance_catchup' });
     });
 
     test('a later tick of the same chunk in the same run does NOT clear it — that failure is this run\'s own', async () => {

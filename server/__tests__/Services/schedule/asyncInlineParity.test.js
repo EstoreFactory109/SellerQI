@@ -33,6 +33,7 @@ let mockEngineRows = [];
 jest.mock('../../../models/amazon-ads/AsyncReportRequestModel.js', () => ({
     find: () => ({ lean: async () => mockEngineRows }),
     deleteOne: jest.fn().mockResolvedValue({}),
+    deleteMany: jest.fn().mockResolvedValue({}),
 }));
 
 const { ScheduledIntegration: SI } = require('../../../Services/schedule/ScheduledIntegration.js');
