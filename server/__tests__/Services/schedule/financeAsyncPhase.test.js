@@ -308,6 +308,10 @@ describe('_runAsyncFinancePhase — the chunk walk', () => {
     });
 });
 
+// The empty-report re-submit deletes the NO_DATA row; the first-tick clean-up of a leftover FAILED
+// row is a separate deleteOne (filtered on status FAILED). These tests are about the former.
+const emptyRetryDeletes = () => mockDeleteOne.mock.calls.filter(([filter]) => filter?.status !== 'FAILED');
+
 describe('_runAsyncFinancePhase — the empty-report retry is bounded', () => {
     const recentChunks = [{ startDate: new Date(Date.now() - 3 * 86400000).toISOString().substring(0, 10), endDate: new Date(Date.now() - 1 * 86400000).toISOString().substring(0, 10) }];
 
@@ -331,7 +335,7 @@ describe('_runAsyncFinancePhase — the empty-report retry is bounded', () => {
             userId: USER, Region: REGION, Country: COUNTRY, phaseData: recentFrozen(),
         });
 
-        expect(mockDeleteOne).toHaveBeenCalledTimes(1);          // row removed → engine re-submits
+        expect(emptyRetryDeletes()).toHaveLength(1);             // row removed → engine re-submits
         expect(res.reschedule).toBeDefined();
         expect(res.dataForNextPhase.financeChunkIndex).toBe(0);  // same chunk
         expect(res.dataForNextPhase.financeEmptyRetries[recentKey()]).toBe(1);
@@ -346,7 +350,7 @@ describe('_runAsyncFinancePhase — the empty-report retry is bounded', () => {
             phaseData: recentFrozen({ financeEmptyRetries: { [recentKey()]: 1 } }),
         });
 
-        expect(mockDeleteOne).not.toHaveBeenCalled();
+        expect(emptyRetryDeletes()).toHaveLength(0);
         expect(res.success).toBe(true);
         expect(res.reschedule).toBeUndefined();
     });
@@ -360,8 +364,38 @@ describe('_runAsyncFinancePhase — the empty-report retry is bounded', () => {
             userId: USER, Region: REGION, Country: COUNTRY, phaseData: frozenPhaseData({ financeChunkIndex: 2 }),
         });
 
-        expect(mockDeleteOne).not.toHaveBeenCalled();
+        expect(emptyRetryDeletes()).toHaveLength(0);
         expect(res.success).toBe(true);
+    });
+});
+
+describe('_runAsyncFinancePhase — a FAILED chunk from an earlier run today is retried for real', () => {
+    const KEY0 = `${CHUNKS[0].startDate}_${CHUNKS[0].endDate}`;
+    const failedCleanups = () => mockDeleteOne.mock.calls.filter(([filter]) => filter?.status === 'FAILED');
+
+    test('the first tick of a chunk clears a leftover FAILED row so the engine resubmits', async () => {
+        mockRunAsyncAdsReports.mockResolvedValue({ done: false, reschedule: { delayMs: 300000, pollAttempt: 1 } });
+
+        const res = await SI._runAsyncFinancePhase({ userId: USER, Region: REGION, Country: COUNTRY, phaseData: {} });
+
+        expect(failedCleanups()).toHaveLength(1);
+        expect(failedCleanups()[0][0]).toMatchObject({ paramsKey: KEY0, runDate: CHUNKS[0].endDate, group: 'sched_finance', phase: 'finance', status: 'FAILED' });
+        // Clean-up happens before the engine is asked to submit.
+        expect(mockDeleteOne.mock.invocationCallOrder[0]).toBeLessThan(mockRunAsyncAdsReports.mock.invocationCallOrder[0]);
+        expect(res.dataForNextPhase.financeStartedChunks).toEqual([KEY0]);
+    });
+
+    test('a later tick of the same chunk in the same run does NOT clear it — that failure is this run\'s own', async () => {
+        mockEngineRows = [engineRow('FAILED', { note: 'boom' })];
+        mockRunAsyncAdsReports.mockResolvedValue({ done: true, summary: {} });
+
+        await SI._runAsyncFinancePhase({
+            userId: USER, Region: REGION, Country: COUNTRY,
+            phaseData: frozenPhaseData({ financeStartedChunks: [KEY0] }),
+        });
+
+        expect(failedCleanups()).toHaveLength(0);
+        expect(mockRecordSyncFailure).toHaveBeenCalledTimes(1);   // the real attempt is still counted once
     });
 });
 
@@ -372,6 +406,24 @@ describe('_runAsyncFinancePhase — guards', () => {
         expect(res.success).toBe(false);
         expect(res.error).toMatch(/tokens unavailable/i);
         expect(mockRunAsyncAdsReports).not.toHaveBeenCalled();
+    });
+
+    test('missing SP-API tokens record financeSync, so finalize can decide (skipped when never connected, under on)', async () => {
+        const prev = process.env.CREDENTIAL_SKIP_MODE;
+        process.env.CREDENTIAL_SKIP_MODE = 'on';
+        try {
+            SI._prepareForBatchPhase.mockResolvedValue({ AccessToken: null, RefreshToken: null });
+            const res = await SI._runAsyncFinancePhase({ userId: USER, Region: REGION, Country: COUNTRY, phaseData: {} });
+            expect(res.dataForNextPhase.apiResults.financeSync).toMatchObject({ success: false, skipped: true, reason: 'sp_not_connected' });
+
+            // A refresh token that failed to exchange is a real failure, so the day retries.
+            SI._prepareForBatchPhase.mockResolvedValue({ AccessToken: null, RefreshToken: 'rt' });
+            const res2 = await SI._runAsyncFinancePhase({ userId: USER, Region: REGION, Country: COUNTRY, phaseData: {} });
+            expect(res2.dataForNextPhase.apiResults.financeSync.success).toBe(false);
+            expect(res2.dataForNextPhase.apiResults.financeSync.skipped).toBeUndefined();
+        } finally {
+            if (prev === undefined) delete process.env.CREDENTIAL_SKIP_MODE; else process.env.CREDENTIAL_SKIP_MODE = prev;
+        }
     });
 
     test('up_to_date still runs the tail and reports success', async () => {
