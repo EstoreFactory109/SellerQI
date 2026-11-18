@@ -98,7 +98,10 @@ const generateAdsAccessToken=async(refreshToken)=>{
             
             // If it's invalid_grant, the refresh token is expired or invalid
             if (errorData?.error === 'invalid_grant') {
-                throw new ApiError(401, `Amazon Ads refresh token is invalid or expired. Please reconnect your Amazon Ads account.`);
+                const revoked = new ApiError(401, `Amazon Ads refresh token is invalid or expired. Please reconnect your Amazon Ads account.`);
+                // Machine-readable, so callers can record a revoked grant without matching text.
+                revoked.code = 'invalid_grant';
+                throw revoked;
             }
             
             throw new ApiError(status, `Amazon Ads token refresh failed: ${errorMessage}`);

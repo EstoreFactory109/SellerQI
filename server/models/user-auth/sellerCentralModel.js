@@ -168,6 +168,27 @@ const sellerCentral=new mongoose.Schema({
     type: String,
     required: false,
   },
+  // Refresh-token revocation (Amazon answered `invalid_grant`): the seller removed SellerQI's
+  // access, so no retry can succeed until they reconnect. Written by the daily pipeline's token
+  // exchange (ScheduledIntegration.generateTokens), CLEARED on the next successful exchange and
+  // whenever a new refresh token is saved. Read by BackgroundJobs/accountCredentials.js.
+  // Distinct from spiOrdersAuthDeniedAt above, which is one restricted role, not the whole grant.
+  spiAuthRevokedAt: {
+    type: Date,
+    required: false,
+  },
+  spiAuthRevokedReason: {
+    type: String,
+    required: false,
+  },
+  adsAuthRevokedAt: {
+    type: Date,
+    required: false,
+  },
+  adsAuthRevokedReason: {
+    type: String,
+    required: false,
+  },
   // Days from ordering stock to it being sellable at Amazon, set by the seller.
   // Unset = the 45-day default (tasks-logics.xlsx "Products to Replenish").
   replenishLeadTimeDays: {

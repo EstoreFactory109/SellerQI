@@ -37,14 +37,47 @@ const { runFbaInventorySyncForMarketplace } = require('../Sp_API/FbaInventorySto
 // Incremental dashboard slice writes — additive, non-fatal (see DashboardSliceService).
 const dashboardSliceService = require('../dashboard/DashboardSliceService.js');
 const { financeAsyncEnabledFor, adsAsyncEnabledFor } = require('../../utils/asyncFinanceGate.js');
+const { credentialSkipModeFor, MODES: CREDENTIAL_MODES } = require('../../utils/credentialSkipGate.js');
 const { marketplaceTodayStr, marketplaceYesterdayStr, addDaysToDateStr } = require('../../utils/marketplaceTimezone.js');
 
 // How many days (ending yesterday) the daily ads phase re-fetches. Amazon attributes SB/SD
 // conversions for 14 days after the click; the 15th day is margin. See fetchScheduledApiData.
 const ADS_RESYNC_DAYS = 15;
+// The daily finance sync window, shared by the inline (fetchScheduledApiData) and async
+// (sched_finance) paths so they cannot drift — the async path once ran with resyncDays 0 and never
+// re-checked late refunds. Why each value is what it is: the comment above the financeSync call in
+// fetchScheduledApiData. maxIncrementalDays must stay >= resyncDays.
+const FINANCE_DAILY_SYNC_OPTS = Object.freeze({ backfillDays: 30, maxIncrementalDays: 14, resyncDays: 14 });
 const { SLICE_KEYS } = dashboardSliceService;
 
 class ScheduledIntegration {
+    /**
+     * The daily ads re-fetch window: ADS_RESYNC_DAYS days ending the marketplace's yesterday.
+     * One definition for the inline and async ads paths (see fetchScheduledApiData for why 15).
+     */
+    static _adsResyncWindow(Country) {
+        const endDate = marketplaceYesterdayStr(Country);
+        return { startDate: addDaysToDateStr(endDate, -(ADS_RESYNC_DAYS - 1)), endDate };
+    }
+
+    /**
+     * The result recorded for a service that could not run because its token is null — shared by
+     * the inline path (fetchScheduledApiData) and the async runners so both record the same thing.
+     *
+     *   notConnected && CREDENTIAL_SKIP_MODE=on  → `skipped` (left out of finalize and the
+     *                                               daily-complete gate)
+     *   notConnected && dry_run                  → legacy failure tagged `wouldSkip`
+     *   otherwise (off, or the exchange failed)  → plain failure, so the day retries
+     *
+     * `success:false` is kept on every shape so older readers stay correct.
+     */
+    static _missingTokenResult(userId, error, notConnected, reason) {
+        const mode = credentialSkipModeFor(userId);
+        if (!notConnected || mode === CREDENTIAL_MODES.OFF) return { success: false, data: null, error };
+        if (mode === CREDENTIAL_MODES.ON) return { success: false, skipped: true, reason, data: null, error };
+        return { success: false, wouldSkip: true, reason, data: null, error };
+    }
+
     /**
      * Get scheduled API data based on day of week
      * @param {string} userId - User ID
@@ -657,6 +690,12 @@ class ScheduledIntegration {
             });
         }
 
+        // Per-credential outcome for the caller to persist (see _recordCredentialRevocation):
+        // `*Revoked` is Amazon's reason ONLY when it answered `invalid_grant` — a timeout or 5xx
+        // is transient and must never mark a grant revoked. `*Ok` means a token was obtained.
+        // Returned on both the success and the failure path.
+        const revocation = { spOk: false, adsOk: false, spRevoked: null, adsRevoked: null };
+
         try {
             const tokenPromises = [];
             const tokenTypes = [];
@@ -706,6 +745,10 @@ class ScheduledIntegration {
             if (AdsRefreshToken) {
                 if (tokenResults[tokenIndex].status === 'rejected') {
                     logger.warn(`Amazon Ads token generation failed: ${tokenResults[tokenIndex].reason}`);
+                    const adsReason = tokenResults[tokenIndex].reason;
+                    if (adsReason?.code === 'invalid_grant') {
+                        revocation.adsRevoked = String(adsReason.message || 'invalid_grant');
+                    }
                 } else {
                     AdsAccessToken = tokenResults[tokenIndex].value;
                     if (!AdsAccessToken) {
@@ -713,6 +756,12 @@ class ScheduledIntegration {
                         AdsAccessToken = null;
                     }
                 }
+            }
+
+            revocation.spOk = !!AccessToken;
+            revocation.adsOk = !!AdsAccessToken;
+            if (RefreshToken && !AccessToken && spapiErr.code === 'invalid_grant') {
+                revocation.spRevoked = String(spapiErr.message || 'invalid_grant');
             }
 
             // Surface auth failures explicitly on the logging page. A refresh
@@ -748,7 +797,7 @@ class ScheduledIntegration {
                 });
             }
 
-            return { success: true, AccessToken, AdsAccessToken };
+            return { success: true, AccessToken, AdsAccessToken, revocation };
 
         } catch (tokenError) {
             logger.error("Failed to generate any access tokens", {
@@ -758,7 +807,57 @@ class ScheduledIntegration {
             if (loggingHelper) {
                 loggingHelper.logFunctionError('generateAccessTokens', tokenError);
             }
-            return { success: false, statusCode: 500, error: `Token generation failed: ${tokenError.message}` };
+            return { success: false, statusCode: 500, error: `Token generation failed: ${tokenError.message}`, revocation };
+        }
+    }
+
+    /**
+     * Persist the outcome of a run's token exchange on the sellerAccount entry, so the producer
+     * can stop enqueueing an account whose grant Amazon has revoked (accountCredentials.js).
+     *
+     *   revoked (`invalid_grant`)  → $set *AuthRevokedAt / *AuthRevokedReason
+     *   token obtained             → $unset them (the seller reconnected, or it was a one-off)
+     *   anything else              → untouched: a timeout or 5xx says nothing about the grant
+     *
+     * Runs in every CREDENTIAL_SKIP_MODE — only ACTING on the fields is gated — so the data is
+     * already there when the gate is turned on. The $unset is filtered to entries that carry the
+     * field, so the common case (healthy account, nothing to clear) matches nothing and writes
+     * nothing. Non-fatal: a failed write must never fail the phase.
+     *
+     * @param {object} revocation  generateTokens' `revocation` ({spOk, adsOk, spRevoked, adsRevoked})
+     */
+    static async _recordCredentialRevocation(userId, Country, Region, revocation) {
+        if (!revocation) return;
+        const arrayFilters = (field) => [{ 'acct.country': Country, 'acct.region': Region, ...(field ? { [`acct.${field}`]: { $exists: true } } : {}) }];
+        const writes = [];
+
+        const plan = [
+            { ok: revocation.spOk, revoked: revocation.spRevoked, at: 'spiAuthRevokedAt', why: 'spiAuthRevokedReason', label: 'SP-API' },
+            { ok: revocation.adsOk, revoked: revocation.adsRevoked, at: 'adsAuthRevokedAt', why: 'adsAuthRevokedReason', label: 'Ads' },
+        ];
+        for (const p of plan) {
+            if (p.revoked) {
+                logger.warn(`[ScheduledIntegration] ${p.label} grant revoked for ${userId} ${Country}-${Region} — recording it; the seller must reconnect`, { reason: p.revoked });
+                writes.push(Seller.updateOne(
+                    { User: userId },
+                    { $set: { [`sellerAccount.$[acct].${p.at}`]: new Date(), [`sellerAccount.$[acct].${p.why}`]: String(p.revoked).slice(0, 500) } },
+                    { arrayFilters: arrayFilters(null) }
+                ));
+            } else if (p.ok) {
+                writes.push(Seller.updateOne(
+                    { User: userId, sellerAccount: { $elemMatch: { country: Country, region: Region, [p.at]: { $exists: true } } } },
+                    { $unset: { [`sellerAccount.$[acct].${p.at}`]: '', [`sellerAccount.$[acct].${p.why}`]: '' } },
+                    { arrayFilters: arrayFilters(p.at) }
+                ));
+            }
+        }
+        if (!writes.length) return;
+
+        const results = await Promise.allSettled(writes);
+        for (const r of results) {
+            if (r.status === 'rejected') {
+                logger.warn(`[ScheduledIntegration] Could not record credential state for ${userId} ${Country}-${Region} (non-fatal): ${r.reason?.message || r.reason}`);
+            }
         }
     }
 
@@ -954,6 +1053,19 @@ class ScheduledIntegration {
 
         const apiData = {};
 
+        // The result recorded for a token-gated service whose token is null. Under
+        // CREDENTIAL_SKIP_MODE=on, a token that is null because the seller NEVER CONNECTED that
+        // API (no refresh token stored — or, for Ads, no ProfileId, which getSellerDataAndTokens
+        // already folds into a null AdsRefreshToken) is `skipped`, which finalize and
+        // _canMarkDailyComplete then leave out. A token that is null because the exchange failed
+        // stays a failure: it may be transient, and a revoked grant is recorded separately.
+        // `success:false` is kept on the skipped shape so every older reader stays correct.
+        // Under `dry_run` the result is the legacy failure, tagged `wouldSkip` so finalize can
+        // log what `on` would have decided without changing anything.
+        const missingTokenResult = (error, notConnected, reason) => this._missingTokenResult(userId, error, notConnected, reason);
+        const spNotConnected = !RefreshToken;
+        const adsNotConnected = !AdsRefreshToken;
+
         // Ads date window. ADS ONLY — used at the serviceFunction call sites below. Amazon Ads
         // buckets report rows by the marketplace's local day (Pacific for NA), so "yesterday"
         // is the marketplace's yesterday, resolved DST-correctly by utils/marketplaceTimezone.js
@@ -963,8 +1075,9 @@ class ScheduledIntegration {
         // settle: Amazon attributes SB/SD conversions for 14 days after the click, so a date is
         // not final until 14 days later. 15 gives one day of margin — at 14 the oldest date got
         // its last refresh on the very day its attribution window closed.
-        const scheduleYesterday = marketplaceYesterdayStr(Country);
-        const adsResyncStartDate = addDaysToDateStr(scheduleYesterday, -(ADS_RESYNC_DAYS - 1));
+        //
+        // Shared with the async ads phases via _adsResyncWindow so the two paths cannot drift.
+        const { startDate: adsResyncStartDate, endDate: scheduleYesterday } = this._adsResyncWindow(Country);
         logger.info(`ScheduledIntegration: Daily ads window = ${adsResyncStartDate} … ${scheduleYesterday} (${ADS_RESYNC_DAYS} days, marketplace-local)`);
         
         // Get functions scheduled for today
@@ -1240,19 +1353,19 @@ class ScheduledIntegration {
             // Check token requirements
             if (requiresAccessToken && !AccessToken) {
                 logger.info(`Skipping ${description} - AccessToken not available`);
-                apiData[dataKey] = { success: false, data: null, error: "SP-API token not available" };
+                apiData[dataKey] = missingTokenResult("SP-API token not available", spNotConnected, 'sp_not_connected');
                 continue;
             }
 
             if (requiresAdsToken && !AdsAccessToken) {
                 logger.info(`Skipping ${description} - AdsAccessToken not available`);
-                apiData[dataKey] = { success: false, data: null, error: "Ads token not available" };
+                apiData[dataKey] = missingTokenResult("Ads token not available", adsNotConnected, 'ads_not_connected');
                 continue;
             }
 
             if (requiresRefreshToken && !RefreshToken) {
                 logger.info(`Skipping ${description} - RefreshToken not available`);
-                apiData[dataKey] = { success: false, data: null, error: "Refresh token not available" };
+                apiData[dataKey] = missingTokenResult("Refresh token not available", spNotConnected, 'sp_not_connected');
                 continue;
             }
 
@@ -1494,9 +1607,7 @@ class ScheduledIntegration {
                         accessToken: AccessToken,
                         clientId: process.env.SPAPI_CLIENT_ID,
                         clientSecret: process.env.SPAPI_CLIENT_SECRET,
-                        backfillDays: 30,
-                        maxIncrementalDays: 14,
-                        resyncDays: 14,
+                        ...FINANCE_DAILY_SYNC_OPTS,
                     })
                         .then(result => {
                             logger.info('Finance Sync succeeded', {
@@ -1591,13 +1702,13 @@ class ScheduledIntegration {
             if (scheduledFunctions['v2data'] && AccessToken) {
                 apiData.v2data = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1] || 'V2 Seller Performance Report');
             } else if (scheduledFunctions['v2data']) {
-                apiData.v2data = { success: false, data: null, error: "SP-API token not available" };
+                apiData.v2data = missingTokenResult("SP-API token not available", spNotConnected, 'sp_not_connected');
             }
             
             if (scheduledFunctions['v1data'] && AccessToken) {
                 apiData.v1data = processApiResult(firstBatchResults[resultIndex++], firstBatchServiceNames[resultIndex - 1] || 'V1 Seller Performance Report');
             } else if (scheduledFunctions['v1data']) {
-                apiData.v1data = { success: false, data: null, error: "SP-API token not available" };
+                apiData.v1data = missingTokenResult("SP-API token not available", spNotConnected, 'sp_not_connected');
             }
 
             // NOTE: the four ads services (ppcSpendsBySKU, adsKeywordsPerformanceData,
@@ -2451,7 +2562,18 @@ class ScheduledIntegration {
         for (const [key, value] of Object.entries(apiData)) {
             if (!value || typeof value !== 'object' || Array.isArray(value) || !('success' in value)) continue;
             try {
-                if (value.success === false) {
+                if (value.skipped === true) {
+                    // Not connected (CREDENTIAL_SKIP_MODE=on): nothing was attempted, so this is
+                    // not a failure. The schema's `skipped` status is counted separately by
+                    // UserAccountLogs.updateSummary.
+                    await LoggingHelper.addLogToSession(sessionId, {
+                        functionName: key,
+                        logType: 'info',
+                        status: 'skipped',
+                        message: `${key} skipped: ${value.error || value.reason || 'not connected'}`,
+                        contextData
+                    });
+                } else if (value.success === false) {
                     await LoggingHelper.addLogToSession(sessionId, {
                         functionName: key,
                         logType: 'error',
@@ -2507,6 +2629,9 @@ class ScheduledIntegration {
             if (!credentialsResult.success) return { success: false, error: credentialsResult.error, statusCode: credentialsResult.statusCode };
 
             const tokenResult = await this.generateTokens(userId, RefreshToken, AdsRefreshToken, loggingHelper);
+            // Once per run, here only: batch phases re-run the exchange (mostly cache hits) and
+            // would only repeat the same write.
+            await this._recordCredentialRevocation(userId, Country, Region, tokenResult.revocation);
             if (!tokenResult.success) return { success: false, error: tokenResult.error, statusCode: tokenResult.statusCode };
             const { AccessToken, AdsAccessToken } = tokenResult;
 
@@ -2899,6 +3024,9 @@ class ScheduledIntegration {
         return this._runAsyncAdsPhase({
             userId, Region, Country, phaseData, group: 'sched_batch_1_2', services,
             inlineOnFirstTick, sliceKeys: [SLICE_KEYS.INVENTORY, SLICE_KEYS.PERFORMANCE],
+            // SP-API specs carry no dates, so the run must be named by day explicitly — without
+            // it runDate was null and these reports refreshed only when their rows expired (~30 days).
+            runDate: marketplaceTodayStr(Country),
             // These are SP-API report services, not Amazon Ads. Without this the shared
             // runner reports their failures as "all Amazon Ads reports failed" and tells
             // the seller to re-authorize Ads — the wrong integration entirely.
@@ -3052,7 +3180,11 @@ class ScheduledIntegration {
             // targets with bids, so ACoS tasks can propose target bid cuts too.
             require('../AmazonAds/AdsTargets.js').adsAsync,
         ];
-        return this._runAsyncAdsPhase({ userId, Region, Country, phaseData, group: 'sched_ads', services, sliceKeys: [SLICE_KEYS.ADS] });
+        return this._runAsyncAdsPhase({
+            userId, Region, Country, phaseData, group: 'sched_ads', services, sliceKeys: [SLICE_KEYS.ADS],
+            // The inline window. Without it every buildSpecs fell back to its own 30-day default.
+            dateRange: this._adsResyncWindow(Country),
+        });
     }
 
     /**
@@ -3063,7 +3195,7 @@ class ScheduledIntegration {
      * runDate don't collide. `dateRange` restricts to a single day (catch-up).
      * `inlineOnFirstTick(ctx)` runs any non-polling sibling services once (BATCH_4).
      */
-    static async _runAsyncAdsPhase({ userId, Region, Country, phaseData, group, services, dateRange = null, inlineOnFirstTick = null, sliceKeys = [], buildArgsFrom = null, tokenGuard = null, pollConfig = null, integration = 'Amazon Ads' }) {
+    static async _runAsyncAdsPhase({ userId, Region, Country, phaseData, group, services, dateRange = null, runDate: runDateOverride = null, inlineOnFirstTick = null, sliceKeys = [], buildArgsFrom = null, tokenGuard = null, pollConfig = null, integration = 'Amazon Ads' }) {
         const { runAsyncAdsReports } = require('../AmazonAds/asyncReportEngine.js');
         const AsyncReportRequest = require('../../models/amazon-ads/AsyncReportRequestModel.js');
         // Same descriptor the engine uses for its own failures: keeps the message verbatim (so
@@ -3081,6 +3213,13 @@ class ScheduledIntegration {
         // tokenGuard + buildArgsFrom (SP access token + baseuri + marketplaceIds).
         const guard = tokenGuard || ((ctx) => (!ctx.AdsAccessToken || !ctx.ProfileId) ? 'Ads token/profile unavailable' : null);
         const makeArgs = buildArgsFrom || ((ctx) => ({ userId, country: Country, region: Region, accessToken: ctx.AdsAccessToken, profileId: ctx.ProfileId, marketplaceId: '', ...(dateRange || {}) }));
+        // Poll state is per PHASE, but phaseData is merged cumulatively down the chain
+        // (scheduledPhases.createNextPhaseJobData). Without this reset on every exit, sched_ads'
+        // `adsAsyncStarted: true` reached sched_batch_4, which then believed its first tick had
+        // already run and skipped inlineOnFirstTick — negativeKeywords / keywordRecommendations
+        // were never fetched on the async path (1 of 7 async accounts had any in 5 days).
+        // `adsRunDate` is the frozen per-phase run date (see below).
+        const POLL_STATE_ENDED = { adsAsyncStarted: false, adsPollAttempt: 0, adsInlineResults: null, adsRunDate: null };
 
         logger.info(`[AsyncPhase:${group}] Starting (stage=${phaseData.adsAsyncStarted ? 'POLL' : 'SUBMIT'}) for user ${userId}, ${Country}-${Region}`);
         try {
@@ -3088,12 +3227,37 @@ class ScheduledIntegration {
             const guardErr = guard(ctx);
             if (guardErr) {
                 logger.warn(`[AsyncPhase:${group}] ${guardErr} — skipping`, { userId, Country, Region });
-                return { success: false, error: guardErr, dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}) } } };
+                // Record a result per service, exactly as the inline path does for a missing token.
+                // Returning none used to read as "no ads service ran" in _canMarkDailyComplete, so
+                // a FAILED token exchange stamped the day complete with no ads data and no retry.
+                const notConnected = integration === 'SP-API' ? !ctx.RefreshToken : !ctx.AdsRefreshToken;
+                const guardResults = {};
+                for (const svc of services) {
+                    if (svc && svc.serviceName) {
+                        guardResults[svc.serviceName] = this._missingTokenResult(
+                            userId, guardErr, notConnected,
+                            integration === 'SP-API' ? 'sp_not_connected' : 'ads_not_connected'
+                        );
+                    }
+                }
+                return { success: false, error: guardErr, dataForNextPhase: { ...POLL_STATE_ENDED, apiResults: { ...(phaseData.apiResults || {}), ...guardResults } } };
             }
 
             const buildArgs = makeArgs(ctx);
             const specs = services.flatMap(s => s.buildSpecs(buildArgs));
-            const runDate = (dateRange && dateRange.endDate) || specs.find(sp => sp.params && sp.params.endDate)?.params.endDate;
+            // Engine rows are scoped by runDate, so it MUST identify the day: a missing one is stored
+            // as null, every later day then matches the first day's terminal rows, and nothing is
+            // ever resubmitted. That is how sched_batch_1_2 (SP-API specs carry no dates) refreshed
+            // only when the rows' 30-day TTL expired. Callers whose specs have no endDate pass one.
+            // Frozen for the life of the phase: a poll tick after midnight would otherwise compute
+            // a new date, find no rows for it, and resubmit every report.
+            const runDate = (phaseData.adsAsyncStarted && phaseData.adsRunDate)
+                || runDateOverride
+                || (dateRange && dateRange.endDate)
+                || specs.find(sp => sp.params && sp.params.endDate)?.params.endDate;
+            if (!runDate) {
+                throw new Error(`[AsyncPhase:${group}] no runDate — refusing to submit (engine rows would be shared across days)`);
+            }
 
             // Non-polling sibling services (e.g. BATCH_4 negative/recommendations) run once
             // on the first tick — they don't hold the worker meaningfully (no report poll).
@@ -3116,6 +3280,7 @@ class ScheduledIntegration {
                         adsAsyncStarted: true,
                         adsPollAttempt: engineRes.reschedule.pollAttempt,
                         adsInlineResults: inlineResults,
+                        adsRunDate: runDate,
                         apiResults: { ...(phaseData.apiResults || {}), ...inlineResults },
                     },
                 };
@@ -3203,6 +3368,17 @@ class ScheduledIntegration {
                 await this._writePhaseSlices(group, sliceKeys, { userId, country: Country, region: Region, apiData: apiResults });
             }
 
+            // SP-API phases (sched_batch_1_2) are judged by their own services. _adsOutcomeOk needs
+            // an ads key, which an SP-API phase never produces, so it reported every such run as
+            // "PPC metrics failed: unknown error".
+            if (integration === 'SP-API') {
+                const ownOk = services.some(svc => apiResults[svc.serviceName]?.success === true);
+                return {
+                    success: ownOk,
+                    error: ownOk ? null : 'No SP-API reports returned data',
+                    dataForNextPhase: { ...POLL_STATE_ENDED, apiResults },
+                };
+            }
             const anySucceeded = Object.values(apiResults).some(r => r && r.success === true);
             const outcomeOk = this._adsOutcomeOk(apiResults);
             return {
@@ -3210,7 +3386,7 @@ class ScheduledIntegration {
                 error: outcomeOk ? null
                     : (anySucceeded ? `PPC metrics failed: ${apiResults.ppcMetricsAggregated?.error || 'unknown error'}`
                         : 'No ads services returned data'),
-                dataForNextPhase: { apiResults },
+                dataForNextPhase: { ...POLL_STATE_ENDED, apiResults },
             };
         } catch (error) {
             logger.error(`[AsyncReports:${group}] Failed for user ${userId}:`, error);
@@ -3230,7 +3406,7 @@ class ScheduledIntegration {
                 success: false,
                 error: error.message,
                 statusCode: 500,
-                dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), ...failedResults } }
+                dataForNextPhase: { ...POLL_STATE_ENDED, apiResults: { ...(phaseData.apiResults || {}), ...failedResults } }
             };
         }
     }
@@ -3309,7 +3485,10 @@ class ScheduledIntegration {
             const ctx = await this._prepareForBatchPhase(userId, Region, Country, phaseData);
             if (!ctx.AccessToken || !ctx.RefreshToken) {
                 logger.warn(`[AsyncFinance:${group}] SP-API tokens unavailable — skipping`, { userId, Country, Region });
-                return { success: false, error: 'SP-API tokens unavailable', dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}) } } };
+                // Record financeSync exactly as the inline path does. With no key at all, finalize
+                // read finance as not OK forever, so an Ads-only account was never stamped complete.
+                const financeSync = this._missingTokenResult(userId, 'SP-API token not available', !ctx.RefreshToken, 'sp_not_connected');
+                return { success: false, error: 'SP-API tokens unavailable', dataForNextPhase: { apiResults: { ...(phaseData.apiResults || {}), financeSync } } };
             }
 
             const clientId = process.env.SPAPI_CLIENT_ID;
@@ -3384,6 +3563,31 @@ class ScheduledIntegration {
                 userId, country: Country, regionModel: Region, tokenManager, chunk,
             });
 
+            // First time THIS run reaches this chunk: clear ANY row already stored under the same
+            // key, whatever its status, so the engine submits a fresh report — exactly what the
+            // inline path does on every run. The key (group + runDate=chunk.endDate + paramsKey) is
+            // a DATA range, not a run, so earlier runs leave rows that collide with this one:
+            //
+            //   • DONE — the engine treats an existing terminal row as already finished and neither
+            //     submits nor writes anything. Re-checks of old days were therefore silent no-ops.
+            //     Chunks are cut on a 3-day grid from the window start, and the window moves one day
+            //     a day, so the same keys recur: on account 6a57b823571ceb9266953c30 the 30-day deep
+            //     re-sync fetched only its newest chunk every day for weeks, every older chunk
+            //     matching a DONE row from the daily catch-up. 17 Oct–2 Nov stayed as first written
+            //     and read 1.4–3.4% above Data Kiosk (cancellations never picked up). The daily
+            //     14-day re-check (resyncDays) has the same exposure.
+            //   • FAILED — reused as-is, it made no new Amazon attempt yet still added a failure to
+            //     the date's retry count on every hourly retry, burning the cap ~4x faster.
+            //
+            // Later ticks of the same chunk in this run skip this (financeStartedChunks), so the
+            // run's own report is never thrown away mid-poll.
+            const startedChunks = phaseData.financeStartedChunks || [];
+            if (!startedChunks.includes(paramsKey)) {
+                await AsyncReportRequest.deleteMany({
+                    userId: String(userId), country: Country, region: Region, runDate, group, phase: 'finance', paramsKey,
+                });
+            }
+
             const engineRes = await runAsyncAdsReports({
                 userId, country: Country, region: Region, runDate, group, specs,
                 phase: 'finance',
@@ -3398,6 +3602,7 @@ class ScheduledIntegration {
                 financeChunks: chunks,
                 financeLatestSyncDate: latestSyncDate,
                 financeChunkIndex: chunkIndex,
+                financeStartedChunks: startedChunks.includes(paramsKey) ? startedChunks : [...startedChunks, paramsKey],
                 financeEmptyRetries: phaseData.financeEmptyRetries || {},
                 financeAggregate: phaseData.financeAggregate || { salesOrders: 0, skuDocs: 0, overheadDocs: 0, pendingOrders: 0 },
                 // Chunks abandoned mid-walk. Threaded through every reschedule (including the NO_DATA
@@ -3968,6 +4173,9 @@ class ScheduledIntegration {
                 userId, Region, Country, phaseData,
                 group: 'sched_finance',
                 sliceKeys: [SLICE_KEYS.FINANCE],
+                // Same window as the inline path — without it resyncDays defaulted to 0 and late
+                // refunds/cancellations were only picked up by the deep-resync sweep days later.
+                ...FINANCE_DAILY_SYNC_OPTS,
             });
         }
 
@@ -4086,6 +4294,8 @@ class ScheduledIntegration {
             return this._runAsyncAdsPhase({
                 userId, Region, Country, phaseData, group: 'sched_batch_4', services,
                 inlineOnFirstTick, sliceKeys: [SLICE_KEYS.KEYWORDS],
+                // Same window as inline searchKeywords (it used to default to 30 days).
+                dateRange: this._adsResyncWindow(Country),
             });
         }
         try {
@@ -4258,10 +4468,15 @@ class ScheduledIntegration {
     }
 
     static _canMarkDailyComplete(apiResults) {
-        const financeOk = !!(apiResults?.financeSync?.success);
+        // A `skipped` result (CREDENTIAL_SKIP_MODE=on: the seller never connected that API) is
+        // not a failure to retry — no retry can change it. Finance skipped counts as done, and a
+        // skipped ads service does not count as "ran". Before this, an account with no Ads
+        // connection carried four `success:false` ads keys, so adsRan was true, the day was never
+        // stamped, and the account was re-run every tick up to the daily attempt cap.
+        const financeOk = !!(apiResults?.financeSync?.success || apiResults?.financeSync?.skipped === true);
         const adsServiceKeys = ['ppcSpendsBySKU', 'adsKeywordsPerformanceData', 'ppcSpendsDateWise', 'ppcMetricsAggregated'];
         const anyAdsOk = adsServiceKeys.some(k => apiResults?.[k]?.success === true);
-        const adsRan = adsServiceKeys.some(k => apiResults?.[k] && typeof apiResults[k] === 'object' && 'success' in apiResults[k]);
+        const adsRan = adsServiceKeys.some(k => apiResults?.[k] && typeof apiResults[k] === 'object' && 'success' in apiResults[k] && apiResults[k].skipped !== true);
         const adsDataLoss = adsServiceKeys.some(k => apiResults?.[k]?.dataLoss === true);
         // Treat ads as "ok" when no ads service ran at all (e.g. user has no ads connection) — we only
         // block on ads failures that actually surfaced from an attempted fetch.
@@ -4282,8 +4497,12 @@ class ScheduledIntegration {
             // Build a summary from accumulated apiResults across all phases (used by both modes)
             const successful = [];
             const failed = [];
+            const skipped = [];
             for (const [key, result] of Object.entries(apiResults)) {
                 if (result.success) { successful.push(key); }
+                // Never attempted (seller not connected; CREDENTIAL_SKIP_MODE=on). Left out of the
+                // total too, so a run whose every ATTEMPTED service succeeded closes `completed`.
+                else if (result.skipped === true) { skipped.push(key); }
                 else { failed.push({ service: key, error: result.error || 'Unknown error' }); }
             }
             const totalServices = successful.length + failed.length;
@@ -4291,7 +4510,7 @@ class ScheduledIntegration {
             const successPercentage = totalServices > 0 ? Math.round((successful.length / totalServices) * 100) : 0;
 
             logger.info(`[ScheduledIntegration:FinalizePhase] Service summary`, {
-                totalServices, successful: successful.length, failed: failed.length, successPercentage: `${successPercentage}%`
+                totalServices, successful: successful.length, failed: failed.length, skipped: skipped.length, successPercentage: `${successPercentage}%`
             });
 
             // Complete DataFetchTracking (mode-agnostic — same in both paths)
@@ -4424,6 +4643,21 @@ class ScheduledIntegration {
                     userId, country: Country, region: Region,
                     financeOk: gate.financeOk, anyAdsOk: gate.anyAdsOk, adsRan: gate.adsRan,
                     adsDataLoss: gate.adsDataLoss,
+                });
+            }
+
+            // CREDENTIAL_SKIP_MODE=dry_run: what `on` would have decided for this run. Counted
+            // in production before the gate acts; changes nothing.
+            const wouldSkipped = Object.entries(apiResults).filter(([, r]) => r && r.wouldSkip === true).map(([k]) => k);
+            if (wouldSkipped.length > 0) {
+                const asOn = {};
+                for (const [k, r] of Object.entries(apiResults)) asOn[k] = r && r.wouldSkip === true ? { ...r, skipped: true } : r;
+                const wouldGate = this._canMarkDailyComplete(asOn);
+                logger.info(`[ScheduledIntegration:FinalizePhase] [credential dry_run] ${userId} ${Country}-${Region}`, {
+                    wouldSkipCount: wouldSkipped.length,
+                    wouldSkipped,
+                    stampsCompleteNow: gate.canMarkComplete,
+                    wouldStampComplete: wouldGate.canMarkComplete,
                 });
             }
 
