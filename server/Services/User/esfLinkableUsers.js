@@ -50,6 +50,9 @@ const wordRegex = (word) => new RegExp(escapeRegex(word).replace(/['\u2018\u2019
  */
 const SEARCH_FIELDS = ['firstName', 'lastName', 'email', 'additionalEmails.email', 'phone', 'sellerBrands'];
 
+/** What splits a search into words: whitespace and the punctuation commonly typed between words. */
+const SEARCH_WORD_SEPARATORS = /[\s,/_-]+/;
+
 /**
  * A phone number typed with spaces, dashes or brackets ("+1 (555) 123-4567") against one stored in
  * another layout. Matches the same digits in order with anything but digits in between.
@@ -71,7 +74,10 @@ const searchMatch = (search) => {
     const term = (search || '').trim();
     if (!term) return null;
 
-    const words = term.split(/\s+/).filter(Boolean);
+    // Punctuation people type between words ("Acme-Home", "Smith, John") splits too, so it
+    // does not have to match the stored text character for character. An email still works:
+    // each piece of it is found in the email field.
+    const words = term.split(SEARCH_WORD_SEPARATORS).filter(Boolean);
     const everyWord = {
         $and: words.map((word) => {
             const rx = wordRegex(word);
@@ -154,6 +160,93 @@ const sellerLookupStages = () => ([
 ]);
 
 /**
+ * Why an account that matched a search cannot be added, in the order shown.
+ *
+ * One reason per exclusion in linkableBaseMatch(); the tests hold the two together, so an
+ * account the picker leaves out is never left out without saying why. Staff (superAdmin,
+ * esfUser) are not given a reason because they are never shown at all.
+ */
+const BLOCKED_REASONS = ['purged', 'agencyOwner', 'esfClient', 'agencyClient', 'unverified'];
+
+const blockedReasonExpr = () => ({
+    $switch: {
+        branches: [
+            { case: { $ne: [{ $ifNull: ['$purgedAt', null] }, null] }, then: 'purged' },
+            {
+                case: {
+                    $or: [
+                        { $eq: ['$packageType', 'AGENCY'] },
+                        { $in: [{ $ifNull: ['$accessType', null] }, NON_SELLER_ACCESS_TYPES] },
+                    ],
+                },
+                then: 'agencyOwner',
+            },
+            { case: { $eq: ['$isEsfClient', true] }, then: 'esfClient' },
+            {
+                case: {
+                    $or: [
+                        { $eq: ['$isAgencyClient', true] },
+                        { $ne: [{ $ifNull: ['$agencyId', null] }, null] },
+                    ],
+                },
+                then: 'agencyClient',
+            },
+            { case: { $ne: ['$isVerified', true] }, then: 'unverified' },
+        ],
+        default: null,
+    },
+});
+
+/** Staff accounts are never shown to the picker, not even as "can't be added". */
+const HIDDEN_ACCESS_TYPES = ['superAdmin', 'esfUser'];
+
+/**
+ * Accounts matching the search that cannot be adopted, each with the reason.
+ * Shown greyed out under the selectable list so a seller who exists is never just "not found".
+ */
+const getBlockedMatches = async (search, limit = 10) => {
+    const search$ = searchMatch(search);
+    if (!search$) return [];
+
+    const rows = await UserModel.aggregate([
+        {
+            $match: {
+                accessType: { $nin: HIDDEN_ACCESS_TYPES },
+                $nor: [linkableBaseMatch()],
+            },
+        },
+        ...sellerLookupStages(),
+        { $match: search$ },
+        { $addFields: { blockedReason: blockedReasonExpr() } },
+        { $match: { blockedReason: { $ne: null } } },
+        { $sort: { createdAt: -1 } },
+        { $limit: limit },
+        {
+            $lookup: {
+                from: 'users',
+                localField: 'agencyId',
+                foreignField: '_id',
+                as: 'agency',
+                pipeline: [{ $project: { agencyName: 1, firstName: 1, lastName: 1 } }],
+            },
+        },
+        {
+            $project: {
+                firstName: 1, lastName: 1, email: 1, packageType: 1, brandName: 1, blockedReason: 1,
+                agency: { $arrayElemAt: ['$agency', 0] },
+            },
+        },
+    ]);
+
+    return rows.map(({ agency, ...row }) => {
+        const agencyName = agency
+            ? (agency.agencyName || [agency.firstName, agency.lastName].filter(Boolean).join(' ') || null)
+            : null;
+        return { ...row, agencyName };
+    });
+};
+
+/**
  * One page of linkable users plus the count behind every capsule.
  *
  * @param {object} params
@@ -184,8 +277,9 @@ const getLinkableUsers = async ({ search = '', filter = 'all', page = 1, limit =
 
     const filter$ = filterMatch(activeFilter);
 
-    // Rows and counts share the pipeline above, so the base set is scanned once.
-    const [result] = await UserModel.aggregate([
+    // Rows and counts share the pipeline above, so the base set is scanned once. Accounts
+    // that match the search but cannot be added are fetched alongside, only while searching.
+    const [[result], blocked] = await Promise.all([UserModel.aggregate([
         ...pre,
         {
             $facet: {
@@ -215,13 +309,14 @@ const getLinkableUsers = async ({ search = '', filter = 'all', page = 1, limit =
                 ],
             },
         },
-    ]);
+    ]), getBlockedMatches(search)]);
 
     const counts = result?.counts?.[0] || { all: 0, PRO: 0, LITE: 0, connected: 0 };
     const totalCount = result?.total?.[0]?.n || 0;
 
     return {
         users: result?.rows || [],
+        blocked,
         counts: {
             all: counts.all,
             PRO: counts.PRO,
@@ -268,6 +363,9 @@ module.exports = {
     linkableBaseMatch,
     searchMatch,
     filterMatch,
+    BLOCKED_REASONS,
+    blockedReasonExpr,
+    getBlockedMatches,
     sellerLookupStages,
     getLinkableUsers,
     linkUsersToEsf,
