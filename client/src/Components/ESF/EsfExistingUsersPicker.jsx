@@ -28,6 +28,18 @@ const TONES = {
   amber: ['border-amber-400/45 bg-amber-500/15 text-amber-200', 'border-amber-500/15 bg-amber-500/[0.06] text-amber-400 hover:border-amber-400/30 hover:text-amber-200'],
 };
 
+/** Why a matching account cannot be added, as staff should read it. */
+const blockedLabel = (u) => {
+  switch (u.blockedReason) {
+    case 'esfClient': return 'Already an ESF client';
+    case 'agencyClient': return u.agencyName ? `Managed by ${u.agencyName}` : 'Managed by an agency';
+    case 'agencyOwner': return 'Agency owner';
+    case 'unverified': return 'Email not verified';
+    case 'purged': return 'Account removed';
+    default: return "Can't be added";
+  }
+};
+
 const chipClass = (active, tone) =>
   `inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all ${
     (TONES[tone] || TONES.slate)[active ? 0 : 1]
@@ -35,6 +47,8 @@ const chipClass = (active, tone) =>
 
 const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
   const [users, setUsers] = useState([]);
+  // Accounts that matched the search but cannot be adopted, shown with the reason.
+  const [blocked, setBlocked] = useState([]);
   const [counts, setCounts] = useState({});
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1, totalCount: 0 });
   const [search, setSearch] = useState('');
@@ -73,6 +87,7 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
       if (isStale()) return;
       if (res.data?.statusCode === 200) {
         setUsers(res.data.data.users || []);
+        setBlocked(res.data.data.blocked || []);
         setCounts(res.data.data.counts || {});
         setPagination(res.data.data.pagination || { page: 1, totalPages: 1, totalCount: 0 });
       }
@@ -151,11 +166,13 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
             <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
             <span className="ml-2 text-sm text-gray-400">Loading users…</span>
           </div>
-        ) : users.length === 0 ? (
+        ) : users.length === 0 && blocked.length === 0 ? (
           <div className="py-12 text-center">
             <p className="text-sm text-gray-300">No matching users</p>
             <p className="text-xs text-gray-500 mt-1">
-              Only sellers who are not already managed by an agency or this portal appear here.
+              {filter !== 'all' && debouncedSearch.trim()
+                ? 'Nothing under this filter. Try the All filter.'
+                : 'Only sellers who are not already managed by an agency or this portal appear here.'}
             </p>
           </div>
         ) : (
@@ -197,6 +214,33 @@ const EsfExistingUsersPicker = ({ onCancel, onLinked }) => {
                 </label>
               );
             })}
+            {users.length === 0 && filter !== 'all' && (
+              <p className="px-3 py-3 text-xs text-gray-500">
+                No addable users under this filter. Try the All filter.
+              </p>
+            )}
+            {blocked.length > 0 && (
+              <>
+                <p className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-[#080c12]/60">
+                  Found but can&apos;t be added
+                </p>
+                {blocked.map((u) => (
+                  <div key={u._id} className="flex items-center gap-3 px-3 py-2.5 opacity-60" title={blockedLabel(u)}>
+                    <span className="w-4 h-4 shrink-0" aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-100 truncate">
+                        {u.firstName} {u.lastName}
+                        {u.brandName && <span className="text-gray-500 font-normal"> · {u.brandName}</span>}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">{u.email}</p>
+                    </div>
+                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full border border-amber-400/30 bg-amber-500/10 text-amber-300 shrink-0 max-w-[200px] truncate">
+                      {blockedLabel(u)}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )}
 

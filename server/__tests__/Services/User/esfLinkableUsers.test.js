@@ -13,6 +13,8 @@ const {
   linkableBaseMatch,
   searchMatch,
   filterMatch,
+  BLOCKED_REASONS,
+  blockedReasonExpr,
 } = require('../../../Services/User/esfLinkableUsers.js');
 
 describe('esfLinkableUsers', () => {
@@ -98,6 +100,23 @@ describe('esfLinkableUsers', () => {
       expect(searchMatch('12').$or).toBeUndefined();
     });
 
+    it('splits on punctuation typed between words', () => {
+      const hyphen = searchMatch('Acme-Home');
+      expect(hyphen.$and).toHaveLength(2);
+      const brandOf = (m, i) => m.$and[i].$or.find((c) => c.sellerBrands).sellerBrands;
+      expect(brandOf(hyphen, 0).test('Acme Home')).toBe(true);
+      expect(brandOf(hyphen, 1).test('Acme Home')).toBe(true);
+      expect(searchMatch('Smith, John').$and).toHaveLength(2);
+    });
+
+    it('still finds an email once it is split into pieces', () => {
+      const m = searchMatch('john_doe-1@acme.com');
+      const email = 'John_Doe-1@Acme.com';
+      for (const clause of m.$and) {
+        expect(clause.$or.find((c) => c.email).email.test(email)).toBe(true);
+      }
+    });
+
     it('escapes regex metacharacters instead of letting them run', () => {
       // A search for "a+b" must look for the literal text, not a quantifier.
       const m = searchMatch('a+b(c)');
@@ -129,6 +148,77 @@ describe('esfLinkableUsers', () => {
       const notConnected = filterMatch('notConnected');
       expect(Object.keys(connected)).toEqual(['hasSpApi', 'hasAdsApi']);
       expect(notConnected.$or).toHaveLength(2);
+    });
+  });
+
+  describe('blockedReasonExpr', () => {
+    // A tiny evaluator for the aggregation operators the expression uses.
+    const field = (doc, ref) => (typeof ref === 'string' && ref.startsWith('$') ? doc[ref.slice(1)] : ref);
+    const evalExpr = (doc, e) => {
+      if (Array.isArray(e)) return e.map((x) => evalExpr(doc, x));
+      if (e === null || typeof e !== 'object') return field(doc, e);
+      const [op, arg] = Object.entries(e)[0];
+      const a = Array.isArray(arg) ? arg.map((x) => evalExpr(doc, x)) : arg;
+      switch (op) {
+        case '$ifNull': return a[0] === undefined || a[0] === null ? a[1] : a[0];
+        case '$eq': return (a[0] ?? null) === (a[1] ?? null);
+        case '$ne': return (a[0] ?? null) !== (a[1] ?? null);
+        case '$in': return a[1].includes(a[0]);
+        case '$or': return a.some(Boolean);
+        case '$switch': {
+          const hit = arg.branches.find((b) => evalExpr(doc, b.case));
+          return hit ? hit.then : arg.default;
+        }
+        default: throw new Error(`unhandled ${op}`);
+      }
+    };
+    // linkableBaseMatch() evaluated as a find() filter would.
+    const isLinkable = (doc) => {
+      const m = linkableBaseMatch();
+      return Object.entries(m).every(([k, cond]) => {
+        const v = doc[k] ?? null;
+        if (cond === null) return v === null;
+        if (cond === true) return v === true;
+        if (cond.$nin) return !cond.$nin.includes(v);
+        if ('$ne' in cond) return v !== cond.$ne;
+        throw new Error(`unhandled clause ${k}`);
+      });
+    };
+    const reason = (doc) => evalExpr(doc, blockedReasonExpr());
+    const seller = { accessType: 'user', packageType: 'PRO', isVerified: true };
+
+    it('gives each exclusion its own reason', () => {
+      expect(reason({ ...seller, purgedAt: new Date() })).toBe('purged');
+      expect(reason({ ...seller, packageType: 'AGENCY' })).toBe('agencyOwner');
+      expect(reason({ ...seller, accessType: 'enterpriseAdmin' })).toBe('agencyOwner');
+      expect(reason({ ...seller, isEsfClient: true })).toBe('esfClient');
+      expect(reason({ ...seller, isAgencyClient: true })).toBe('agencyClient');
+      expect(reason({ ...seller, agencyId: 'a1' })).toBe('agencyClient');
+      expect(reason({ ...seller, isVerified: false })).toBe('unverified');
+      expect(reason({ accessType: 'user', packageType: 'LITE' })).toBe('unverified');
+    });
+
+    it('gives no reason to an account the picker can add', () => {
+      expect(reason(seller)).toBeNull();
+      expect(reason({ packageType: 'LITE', isVerified: true })).toBeNull(); // legacy, no accessType
+    });
+
+    it('agrees with linkableBaseMatch: hidden from the list always means a reason is shown', () => {
+      const variants = [
+        {}, { purgedAt: new Date() }, { packageType: 'AGENCY' }, { accessType: 'enterpriseAdmin' },
+        { accessType: undefined }, { isEsfClient: true }, { isAgencyClient: true }, { agencyId: 'a1' },
+        { isVerified: false }, { isVerified: undefined }, { isEsfClient: true, isVerified: false },
+        { agencyId: 'a1', purgedAt: new Date() },
+      ];
+      for (const v of variants) {
+        const doc = { ...seller, ...v };
+        expect([isLinkable(doc), reason(doc) === null]).toEqual([isLinkable(doc), isLinkable(doc)]);
+      }
+    });
+
+    it('only produces the reasons the UI knows how to label', () => {
+      const thens = blockedReasonExpr().$switch.branches.map((b) => b.then);
+      expect(thens).toEqual(BLOCKED_REASONS);
     });
   });
 
