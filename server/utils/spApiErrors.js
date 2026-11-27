@@ -72,6 +72,21 @@ class SpApiAuthDeniedError extends Error {
     }
 }
 
+/**
+ * Thrown when SP-API could not give an answer (throttled, or a 5xx) even after retries.
+ * It is NOT an answer about the order: callers must leave the order untouched (retry on a
+ * later run) and must never record it as "not eligible" or "failed".
+ */
+class SpApiTransientError extends Error {
+    constructor(message, { status = null, amazonMessage = '' } = {}) {
+        super(message);
+        this.name = 'SpApiTransientError';
+        this.code = 'SP_API_TRANSIENT';
+        this.status = status;
+        this.amazonMessage = amazonMessage;
+    }
+}
+
 // Collect every scrap of text Amazon gave us into one lowercased haystack. Handles the
 // SP-API `{errors:[{code,message,details}]}` shape, the plain `{message}` / `{Message}`
 // shapes used by the AWS-side (SigV4/STS) errors, and a raw string body.
@@ -207,6 +222,7 @@ function isRefreshable(classification) {
 module.exports = {
     FAILURE,
     SpApiAuthDeniedError,
+    SpApiTransientError,
     classifySpApiFailure,
     isRefreshable,
 };

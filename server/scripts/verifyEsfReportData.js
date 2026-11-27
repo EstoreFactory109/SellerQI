@@ -188,16 +188,22 @@ const stat = (report, label) => {
             // ---- review requests --------------------------------------------
             const rv = R('review-requests');
             if (rv?.available) {
-                const newest = await ReviewOrder.findOne(q).sort({ purchaseDate: -1 }).select('purchaseDate').lean();
-                const anchor = new Date(`${ymd(new Date(newest.purchaseDate))}T00:00:00.000Z`);
-                const w = { ...q, purchaseDate: { $gte: new Date(anchor.getTime() - 7 * 86400000) } };
-                const total = await ReviewOrder.countDocuments(w);
-                const sent = await ReviewOrder.countDocuments({ ...w, reviewRequestStatus: 'sent' });
-                const eligible = await ReviewOrder.countDocuments({ ...w, canRequestReview: true });
-                check(scope, 'RV orders checked', stat(rv, 'Orders checked'), total);
+                // Independent recount of the reporting week (see buildReviewRequests): each
+                // order counted once, in the week its final result became known.
+                const { start, end } = require('../Services/Calculations/EsfReportsService.js').reviewReportWeek();
+                const wk = { $gte: start, $lt: end };
+                const closed = { $gte: new Date(start.getTime() - 45 * 86400000), $lt: new Date(end.getTime() - 45 * 86400000) };
+                const external = 'Sent externally (via Seller Central)';
+                const sent = await ReviewOrder.countDocuments({ ...q, reviewRequestStatus: 'sent', reviewRequestLastSentAt: wk, reviewRequestError: { $ne: external } });
+                const already = await ReviewOrder.countDocuments({ ...q, reviewRequestStatus: 'sent', reviewRequestLastSentAt: wk, reviewRequestError: external });
+                const failed = await ReviewOrder.countDocuments({ ...q, reviewRequestStatus: 'failed', reviewRequestFailedAt: wk });
+                const notAllowed = await ReviewOrder.countDocuments({ ...q, reviewRequestStatus: 'not_requested', purchaseDate: closed, canRequestReview: false });
+                const notSent = await ReviewOrder.countDocuments({ ...q, reviewRequestStatus: 'not_requested', purchaseDate: closed, canRequestReview: true });
+                const eligible = sent + already + failed + notSent;
+                check(scope, 'RV orders checked', stat(rv, 'Orders checked'), eligible + notAllowed);
                 check(scope, 'RV sent', stat(rv, 'Requests sent'), sent);
                 check(scope, 'RV eligible', stat(rv, 'Eligible'), eligible);
-                check(scope, 'RV ineligible', stat(rv, 'Ineligible'), Math.max(total - eligible, 0));
+                check(scope, 'RV not eligible', stat(rv, 'Not eligible'), notAllowed);
             }
 
             // ---- monthly performance -------------------------------------------

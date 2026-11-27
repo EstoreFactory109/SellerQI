@@ -17,9 +17,16 @@ const ORDER_CONFIG = {
   // Only Shipped orders are eligible for review requests
   orderStatuses: ["Shipped"],
 
-  // Solicitation eligibility window: 5 to 30 days old
+  // Order-age bounds (days since purchase) inside which an order can be eligible.
+  // Amazon's real window is 5 days after the earliest delivery to 30 days after the latest
+  // delivery. Delivery cannot precede purchase, so 5 is a hard floor; FBA orders carry no
+  // delivery date, so the ceiling is generous (45) and Amazon's own eligibility answer,
+  // not these bounds, decides whether a request can be sent.
   minOrderAgeDays: 5,
-  maxOrderAgeDays: 30,
+  // The sender's FIRST check: measured FBA orders were eligible from about day 7, so checks at
+  // day 5-6 are almost always "no". minOrderAgeDays stays the window floor (and UI wording).
+  firstCheckAgeDays: 6,
+  maxOrderAgeDays: 45,
 
   // Delay between each solicitation request (ms) to respect rate limits
   delayBetweenRequests: 1000,
@@ -31,6 +38,11 @@ const ORDER_CONFIG = {
   // if Amazon signals a lower rate at runtime.
   delayBetweenOrderPagesMs: 3000,
 };
+
+// Stored in reviewRequestError when Amazon refused a send because the request had already
+// been made (usually by hand in Seller Central). Reports use it to tell these apart from
+// requests SellerQI sent itself.
+const SENT_EXTERNALLY_NOTE = "Sent externally (via Seller Central)";
 
 // Retry tuning for /orders/v0/orders (rate 0.0167 req/s → one token per 60s after
 // burst is depleted). We need enough total wait for the bucket to refill under
@@ -138,7 +150,7 @@ function enumerateSlices(createdAfter, createdBefore, sliceHours = 24) {
 }
 
 /**
- * Is this purchase date inside Amazon's 5–30 day solicitation window?
+ * Is this purchase date inside the order-age window (see ORDER_CONFIG) in which an order can be eligible?
  *
  * Single source of truth for that window — previously duplicated between the dead
  * `isEligibleForReview` here and private constants in reviewRequestSenderService.js.
@@ -541,6 +553,7 @@ async function fetchOrders(accessToken, awsConfig, credentialProvider = null) {
 
 module.exports = {
   ORDER_CONFIG,
+  SENT_EXTERNALLY_NOTE,
   sleep,
   normalizeEndpoint,
   getDateRange,

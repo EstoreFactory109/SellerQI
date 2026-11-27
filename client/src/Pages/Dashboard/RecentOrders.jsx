@@ -366,9 +366,18 @@ const RecentOrders = () => {
                     order.orderTotalAmount != null
                       ? `${order.orderTotalAmount.toFixed(2)} ${order.orderTotalCurrencyCode || ''}`
                       : '—';
-                  const canRequestStyle = order.canRequestReview
+                  // Three states: Amazon said yes / Amazon said no / not asked yet. `canRequestReview`
+                  // alone made "not asked yet" look like "Amazon said no".
+                  const eligibilityState = order.eligibilityState
+                    || (order.canRequestReview ? 'eligible' : 'ineligible');
+                  const canRequestStyle = eligibilityState === 'eligible'
                     ? { background: 'rgba(34,197,94,.14)', color: COLORS.good }
                     : { background: 'rgba(165,174,192,.14)', color: COLORS.textSecondary };
+                  const eligibilityLabel = eligibilityState === 'eligible'
+                    ? 'Can be sent'
+                    : eligibilityState === 'unchecked'
+                      ? 'Not checked yet'
+                      : 'Not eligible yet';
                   const statusConfig = REVIEW_STATUS_CONFIG[order.reviewRequestStatus] || REVIEW_STATUS_CONFIG.not_requested;
 
                   return (
@@ -389,7 +398,7 @@ const RecentOrders = () => {
                         <td className="px-4 py-3.5 text-right text-sm" style={{ color: COLORS.textPrimary, fontVariantNumeric: 'tabular-nums' }}>{total}</td>
                         <td className="px-4 py-3.5 text-center">
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-semibold" style={canRequestStyle}>
-                            {order.canRequestReview ? 'Can be sent' : "Can't send yet"}
+                            {eligibilityLabel}
                           </span>
                         </td>
                         <td className="px-4 py-3.5 text-sm text-center" style={{ color: COLORS.textSecondary }}>

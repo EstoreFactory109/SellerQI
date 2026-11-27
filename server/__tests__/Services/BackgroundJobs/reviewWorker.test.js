@@ -40,6 +40,10 @@ const mockLockUpdateOne = jest.fn();
 
 jest.mock('../../../models/user-auth/userModel.js', () => ({ find: (...a) => mockUserFind(...a) }));
 jest.mock('../../../models/user-auth/sellerCentralModel.js', () => ({ find: (...a) => mockSellerFind(...a) }));
+const mockBacklog = jest.fn();
+jest.mock('../../../models/review/ReviewOrderModel.js', () => ({
+    aggregate: (...a) => ({ option: () => mockBacklog(...a) }),
+}));
 jest.mock('../../../models/system/OrchestrationCronLockModel.js', () => ({
     findOneAndUpdate: (...a) => mockLockFindOneAndUpdate(...a),
     findOne: (...a) => mockLockFindOne(...a),
@@ -97,6 +101,7 @@ beforeEach(() => {
     mockLockFindOneAndUpdate.mockReset().mockResolvedValue({});
     mockLockFindOne.mockReset();
     mockLockUpdateOne.mockReset().mockResolvedValue({});
+    mockBacklog.mockReset().mockResolvedValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -248,7 +253,20 @@ describe('per account', () => {
         await runReviewTick({ dayOfWeek: 1 });
 
         expect(mockIngest).toHaveBeenCalledWith(PRO_USER, 'US', 'NA', 'review-worker');
-        expect(mockSend).toHaveBeenCalledWith(PRO_USER, 'US', 'NA', 'review-worker');
+        expect(mockSend).toHaveBeenCalledWith(PRO_USER, 'US', 'NA', 'review-worker', { deadline: expect.any(Date) });
+    });
+
+    test('the sender gets the end of the tick as a hard deadline', async () => {
+        // A long send run must never still be going when tomorrow's tick starts: the
+        // date-bucketed lock would let both run on the same account.
+        const { runReviewTick } = loadEnabled({ REVIEW_WORKER_TICK_BUDGET_MS: String(10 * 60 * 60 * 1000) });
+        const before = Date.now();
+
+        await runReviewTick({ dayOfWeek: 0 });
+
+        const { deadline } = mockSend.mock.calls[0][4];
+        expect(deadline.getTime() - before).toBeGreaterThanOrEqual(10 * 60 * 60 * 1000 - 1000);
+        expect(deadline.getTime() - before).toBeLessThanOrEqual(10 * 60 * 60 * 1000 + 1000);
     });
 
     test('sending still runs when ingestion fails', async () => {
@@ -416,6 +434,54 @@ describe('bounds', () => {
 
         expect(summary.processed).toBe(2);
         expect(summary.outOfBudget).toBe(false);
+    });
+});
+
+describe('scheduling across accounts', () => {
+    const users = (ids) => {
+        mockUserFind.mockReturnValue({ lean: async () => ids.map((id) => ({ _id: id })) });
+        mockSellerFind.mockReturnValue({ lean: async () => ids.map((id) => sellerWith(id, [usAccount])) });
+    };
+
+    test('a slow account does not hold up the others (slots, not fixed batches)', async () => {
+        users(['slow', 'a', 'b', 'c']);
+        const done = [];
+        mockSend.mockImplementation(async (userId) => {
+            await new Promise((r) => setTimeout(r, userId === 'slow' ? 200 : 5));
+            done.push(userId);
+            return { success: true };
+        });
+        const { runReviewTick } = loadEnabled({ REVIEW_WORKER_CONCURRENCY: '2' });
+
+        const summary = await runReviewTick({ dayOfWeek: 0 });
+
+        // With fixed batches of 2, 'b' and 'c' would wait for 'slow' to finish.
+        expect(done).toEqual(['a', 'b', 'c', 'slow']);
+        expect(summary.processed).toBe(4);
+    });
+
+    test('the biggest backlog starts first', async () => {
+        users(['small', 'big', 'none']);
+        mockBacklog.mockResolvedValue([
+            { _id: { u: 'small', c: 'US', r: 'NA' }, n: 10 },
+            { _id: { u: 'big', c: 'US', r: 'NA' }, n: 240000 },
+        ]);
+        const { runReviewTick } = loadEnabled({ REVIEW_WORKER_CONCURRENCY: '1' });
+
+        await runReviewTick({ dayOfWeek: 0 });
+
+        expect(mockSend.mock.calls.map((c) => c[0])).toEqual(['big', 'small', 'none']);
+    });
+
+    test('if the backlog query fails, every account still runs in the default order', async () => {
+        users(['x', 'y']);
+        mockBacklog.mockRejectedValue(new Error('timeout'));
+        const { runReviewTick } = loadEnabled({ REVIEW_WORKER_CONCURRENCY: '1' });
+
+        const summary = await runReviewTick({ dayOfWeek: 0 });
+
+        expect(mockSend.mock.calls.map((c) => c[0])).toEqual(['x', 'y']);
+        expect(summary.processed).toBe(2);
     });
 });
 

@@ -42,9 +42,21 @@ describe('reviewIneligibleReason', () => {
 
     it('explains by age, then by whether Amazon was asked', () => {
         expect(why({ ...base, purchaseDate: daysAgo(2) }, { now })).toContain('Too early');
-        expect(why({ ...base, purchaseDate: daysAgo(40) }, { now })).toBe('Past the 30-day request window');
+        expect(why({ ...base, purchaseDate: daysAgo(40) }, { now })).not.toContain('Past the');
+        expect(why({ ...base, purchaseDate: daysAgo(50) }, { now })).toContain('Past the request window');
         expect(why({ ...base, eligibilityLastCheckedAt: daysAgo(1) }, { now })).toContain('Amazon allows no request');
-        expect(why(base, { now, autoSend: false })).toContain('turn on Auto review requests');
+        expect(why(base, { now, autoSend: false })).toContain('Turn on Auto review requests');
         expect(why(base, { now, autoSend: true })).toBe("Waiting for SellerQI's next check with Amazon");
+    });
+});
+
+describe('reviewEligibilityState', () => {
+    const { reviewEligibilityState: state } = require('../../../controllers/review/RecentOrdersController.js');
+
+    it('tells "Amazon said no" apart from "never asked"', () => {
+        expect(state({ canRequestReview: true })).toBe('eligible');
+        expect(state({ canRequestReview: false, eligibilityLastCheckedAt: '2026-10-26T01:00:00Z' })).toBe('ineligible');
+        expect(state({ canRequestReview: null })).toBe('unchecked');
+        expect(state({})).toBe('unchecked');
     });
 });

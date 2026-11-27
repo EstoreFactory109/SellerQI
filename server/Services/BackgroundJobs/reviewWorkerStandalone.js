@@ -241,6 +241,34 @@ async function collectAccounts() {
     return triples;
 }
 
+/**
+ * Sort accounts by how many unsent orders they have inside the request window, largest
+ * first. Purely an ordering: on any failure the original order is kept, nobody is dropped.
+ */
+async function orderByBacklog(triples) {
+    if (triples.length < 2) return triples;
+    const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
+    const DAY = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    try {
+        const rows = await ReviewOrder.aggregate([
+            {
+                $match: {
+                    reviewRequestStatus: 'not_requested',
+                    purchaseDate: { $gte: new Date(now - 45 * DAY), $lte: new Date(now - 5 * DAY) },
+                },
+            },
+            { $group: { _id: { u: '$User', c: '$country', r: '$region' }, n: { $sum: 1 } } },
+        ]).option({ maxTimeMS: 120000 });
+        const backlog = new Map(rows.map((row) => [`${row._id.u}|${row._id.c}|${row._id.r}`, row.n]));
+        const size = (t) => backlog.get(`${t.userId}|${t.country}|${t.region}`) || 0;
+        return [...triples].sort((a, b) => size(b) - size(a));
+    } catch (err) {
+        logger.warn('[ReviewWorker] Could not order accounts by backlog; keeping the default order', { error: err?.message });
+        return triples;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Per account
 // ---------------------------------------------------------------------------
@@ -257,7 +285,7 @@ async function collectAccounts() {
  * awaits (ScheduledIntegration.js:1145-1147), so batches 6 and 7 ran concurrently despite
  * the comments claiming otherwise.
  */
-async function processAccount({ userId, country, region }, { runIngestion }) {
+async function processAccount({ userId, country, region }, { runIngestion, deadline = null }) {
     const { scheduledReviewIngestion } = require('../review/scheduledReviewIngestionProcessor.js');
     const { scheduledReviewRequestSender } = require('../review/scheduledReviewRequestProcessor.js');
 
@@ -276,7 +304,10 @@ async function processAccount({ userId, country, region }, { runIngestion }) {
     // Runs even when ingestion failed. The sender works off orders already persisted by
     // earlier runs; skipping it here would punish a backlog for one bad Amazon call.
     try {
-        const res = await scheduledReviewRequestSender(userId, country, region, 'review-worker');
+        // The deadline (end of this tick) is a hard stop for the sender: a long send run
+        // must never still be going when tomorrow's tick starts on the same account, which
+        // the date-bucketed lock would not prevent.
+        const res = await scheduledReviewRequestSender(userId, country, region, 'review-worker', { deadline });
         outcome.send = { success: !!res?.success, error: res?.error || null, skipped: !!res?.data?.skipped };
     } catch (err) {
         outcome.send = { success: false, error: err?.message || 'sender threw', skipped: false };
@@ -349,40 +380,54 @@ async function runReviewTick(opts = {}) {
         return summary;
     }
 
-    for (let i = 0; i < work.length; i += CONCURRENCY) {
-        if (Date.now() - startedAt > TICK_BUDGET_MS) {
-            summary.outOfBudget = true;
-            logger.warn(`[ReviewWorker] Tick budget (${TICK_BUDGET_MS}ms) exhausted after ${summary.processed}/${work.length} accounts; the rest are deferred to tomorrow.`);
-            break;
+    // Largest backlogs first, so the account that needs the most hours starts at the top of
+    // the tick instead of whenever its turn comes.
+    work = await orderByBacklog(work);
+
+    // Every send run must stop by the end of the tick budget (see processAccount).
+    const deadline = new Date(startedAt + TICK_BUDGET_MS);
+
+    const tally = (r) => {
+        summary.processed++;
+        if (r.status === 'rejected') {
+            // processAccount catches everything, so this is a defect rather than an
+            // account problem. Counted separately so it cannot hide among Amazon errors.
+            summary.errors++;
+            logger.error('[ReviewWorker] processAccount rejected — this should not happen', { error: r.reason?.message, stack: r.reason?.stack });
+            return;
         }
+        const o = r.value;
+        if (o.ingest) { o.ingest.success ? summary.ingestOk++ : summary.ingestFailed++; }
+        if (o.send) {
+            if (o.send.skipped) summary.sendSkippedLitePlan++;
+            else if (o.send.success) summary.sendOk++;
+            else summary.sendFailed++;
+        }
+    };
 
-        const batch = work.slice(i, i + CONCURRENCY);
-        const settled = await Promise.allSettled(
-            batch.map((triple) => processAccount(triple, { runIngestion }))
-        );
-
-        for (const r of settled) {
-            summary.processed++;
-            if (r.status === 'rejected') {
-                // processAccount catches everything, so this is a defect rather than an
-                // account problem. Counted separately so it cannot hide among Amazon errors.
-                summary.errors++;
-                logger.error('[ReviewWorker] processAccount rejected — this should not happen', { error: r.reason?.message, stack: r.reason?.stack });
-                continue;
+    // A pool of CONCURRENCY slots, each taking the next account as soon as it is free.
+    // (Fixed batches waited for the slowest account in each batch, so one account running
+    // for hours held up every account queued behind it.)
+    let next = 0;
+    const slot = async () => {
+        for (;;) {
+            if (next >= work.length) return;
+            if (Date.now() - startedAt > TICK_BUDGET_MS) {
+                if (!summary.outOfBudget) {
+                    summary.outOfBudget = true;
+                    logger.warn(`[ReviewWorker] Tick budget (${TICK_BUDGET_MS}ms) exhausted after ${summary.processed}/${work.length} accounts; the rest are deferred to tomorrow.`);
+                }
+                return;
             }
-            const o = r.value;
-            if (o.ingest) { o.ingest.success ? summary.ingestOk++ : summary.ingestFailed++; }
-            if (o.send) {
-                if (o.send.skipped) summary.sendSkippedLitePlan++;
-                else if (o.send.success) summary.sendOk++;
-                else summary.sendFailed++;
+            const triple = work[next++];
+            const [r] = await Promise.allSettled([processAccount(triple, { runIngestion, deadline })]);
+            tally(r);
+            if (DELAY_BETWEEN_BATCHES_MS && next < work.length) {
+                await sleep(DELAY_BETWEEN_BATCHES_MS);
             }
         }
-
-        if (DELAY_BETWEEN_BATCHES_MS && i + CONCURRENCY < work.length) {
-            await sleep(DELAY_BETWEEN_BATCHES_MS);
-        }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, work.length) }, slot));
 
     summary.durationMs = Date.now() - startedAt;
     return summary;
@@ -521,6 +566,7 @@ module.exports = {
     runReviewTick,
     processAccount,
     collectAccounts,
+    orderByBacklog,
     getActiveUserIdSet,
     lockKeyForToday,
     acquireLock,

@@ -320,7 +320,7 @@ describe('enumerateSlices', () => {
 describe('isWithinReviewWindow', () => {
   const now = new Date('2026-07-28T12:00:00.000Z');
 
-  test('accepts an order inside the 5-30 day window', () => {
+  test('accepts an order inside the order-age window', () => {
     expect(isWithinReviewWindow(new Date('2026-07-18T12:00:00.000Z'), now)).toBe(true);
   });
 
@@ -328,8 +328,8 @@ describe('isWithinReviewWindow', () => {
     expect(isWithinReviewWindow(new Date('2026-07-26T12:00:00.000Z'), now)).toBe(false);
   });
 
-  test('rejects an order past the 30-day deadline', () => {
-    expect(isWithinReviewWindow(new Date('2026-06-20T12:00:00.000Z'), now)).toBe(false);
+  test('rejects an order older than the window ceiling', () => {
+    expect(isWithinReviewWindow(new Date('2026-06-01T12:00:00.000Z'), now)).toBe(false);
   });
 
   test('matches ORDER_CONFIG exactly at both boundaries', () => {

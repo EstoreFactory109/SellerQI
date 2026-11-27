@@ -116,6 +116,11 @@ const ReviewOrderSchema = new mongoose.Schema(
     reviewRequestError: {
       type: String,
     },
+    // When the request was marked "failed". updatedAt cannot stand in for it: ingestion
+    // re-upserts orders several times a week, which moves updatedAt.
+    reviewRequestFailedAt: {
+      type: Date,
+    },
 
     // Tracks which fetch run stored/updated this order
     fetchBatchId: {

@@ -1,6 +1,9 @@
 const { fetchOrders } = require("./orders");
 const { getProductDetailsByOrderId } = require("./ordered_product_details");
-const { checkReviewEligibility } = require("./reviewRequestEligibility");
+const {
+  checkReviewEligibility,
+  hasReviewSolicitationAction,
+} = require("./reviewRequestEligibility");
 const { SpApiAuthDeniedError } = require("../../utils/spApiErrors.js");
 const ReviewOrder = require("../../models/review/ReviewOrderModel");
 const ReviewOrderItem = require("../../models/review/ReviewOrderItemModel");
@@ -91,11 +94,7 @@ async function fetchAndStoreReviewOrders({
       );
 
       // Derive simple boolean flag: can we request a review?
-      const actions =
-        eligibilityResponse?.payload?.actions ||
-        eligibilityResponse?._embedded?.actions ||
-        [];
-      const canRequestReview = Array.isArray(actions) && actions.length > 0;
+      const canRequestReview = hasReviewSolicitationAction(eligibilityResponse);
 
       // 2d) Upsert ReviewOrder document — protect already-processed orders
       const existingOrder = await ReviewOrder.findOne({

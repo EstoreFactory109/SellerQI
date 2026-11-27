@@ -35,6 +35,9 @@ jest.mock('../../../models/products/CompetitiveOffersModel.js', () => ({ findOne
 jest.mock('../../../models/products/SuppressedListingsModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/inventory/RemovalOrdersModel.js', () => ({ findOne: jest.fn() }));
 jest.mock('../../../models/review/ReviewOrderModel.js', () => ({ aggregate: jest.fn(), countDocuments: jest.fn(), findOne: jest.fn() }));
+jest.mock('../../../models/user-auth/userModel.js', () => ({
+    findById: jest.fn(() => ({ select: () => ({ lean: () => Promise.resolve(null) }) })),
+}));
 jest.mock('../../../models/MCP/SalesOnlyMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/amazon-ads/PPCMetricsModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
 jest.mock('../../../models/finance/DailySkuFinanceModel.js', () => ({ aggregate: jest.fn(), findOne: jest.fn() }));
@@ -59,6 +62,7 @@ const Pricing = require('../../../models/products/CompetitiveOffersModel.js');
 const SuppressedListings = require('../../../models/products/SuppressedListingsModel.js');
 const RemovalOrders = require('../../../models/inventory/RemovalOrdersModel.js');
 const ReviewOrder = require('../../../models/review/ReviewOrderModel.js');
+const User = require('../../../models/user-auth/userModel.js');
 const SalesOnlyMetrics = require('../../../models/MCP/SalesOnlyMetricsModel.js');
 const PPCMetrics = require('../../../models/amazon-ads/PPCMetricsModel.js');
 const DailySkuFinance = require('../../../models/finance/DailySkuFinanceModel.js');
@@ -702,72 +706,103 @@ describe('getEsfReports', () => {
     });
 
     describe('review requests', () => {
-        /** The newest order the account holds, which anchors the reported week. */
+        /** The newest order the account holds (only used to spot stale ingestion). */
         const newestOrderAt = (iso) => ReviewOrder.findOne.mockReturnValue({
             sort: () => ({ select: () => ({ lean: () => Promise.resolve(iso ? { purchaseDate: new Date(iso) } : null) }) }),
         });
+        const autoSend = (on) => User.findById.mockReturnValue({
+            select: () => ({ lean: () => Promise.resolve({ reviewRequestAuthStatus: on }) }),
+        });
+        const DAY = 24 * 60 * 60 * 1000;
+        const daysAgo = (d) => new Date(Date.now() - d * DAY).toISOString();
+        const stats = (report) => Object.fromEntries(report.summary.stats.map((s) => [s.label, s.value]));
+        const matchOfLastRun = () => ReviewOrder.aggregate.mock.calls.at(-1)[0][0].$match;
+        const build = async () => byKey(await getEsfReports(USER, 'US', 'NA'), 'review-requests');
 
-        beforeEach(() => newestOrderAt('2026-09-22T00:00:00Z'));
-
-        it('anchors the week on the newest order, not on today', async () => {
-            // Regression: anchoring on today reported "no orders" for accounts
-            // holding tens of thousands, purely because ingestion had not run
-            // for over a week. Found on a live account with 15,973 orders.
-            newestOrderAt('2026-06-16T00:00:00Z');
-            ReviewOrder.countDocuments.mockResolvedValue(15973);
-            ReviewOrder.aggregate.mockResolvedValue([{ _id: 'sent', count: 15973, eligible: 15973 }]);
-
-            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'review-requests');
-
-            expect(report.available).toBe(true);
-            expect(report.date).toBe('Week of 9 Jun 2026');
-            // And it must say the edition is stale rather than pass as current.
-            expect(report.caveats.join(' ')).toMatch(/most recent week with order data/);
+        beforeEach(() => {
+            newestOrderAt(daysAgo(1));
+            autoSend(true);
+            ReviewOrder.aggregate.mockResolvedValue([]);
         });
 
-        it('does not cry stale when the newest order is recent', async () => {
-            // Relative to today: a fixed date here goes stale on its own as time passes.
-            newestOrderAt(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString());
-            ReviewOrder.countDocuments.mockResolvedValue(10);
-            ReviewOrder.aggregate.mockResolvedValue([{ _id: 'sent', count: 10, eligible: 10 }]);
+        it('covers a fixed week ending at the latest weekly send, so editions never overlap', async () => {
+            await build();
+            const [sentClause] = matchOfLastRun().$or;
+            const { $gte: start, $lt: end } = sentClause.reviewRequestLastSentAt;
 
-            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'review-requests');
-            expect(report.caveats).toEqual([]);
+            // Default weekly send is Saturday 08:00 UTC; the week is the 7 whole days before
+            // that Saturday, so the printed dates are exactly what is counted.
+            expect(end.getUTCDay()).toBe(6);
+            expect(end.toISOString().slice(11)).toBe('00:00:00.000Z');
+            expect(end.getTime()).toBeLessThanOrEqual(Date.now());
+            expect(end.getTime() - start.getTime()).toBe(7 * DAY);
+            // End is exclusive, so next week's start (this end) is not counted twice.
+            expect(sentClause.reviewRequestLastSentAt.$lte).toBeUndefined();
+        });
+
+        it('counts each order once, in the week its final result became known', async () => {
+            await build();
+            const clauses = matchOfLastRun().$or;
+
+            // Sent / failed by their own timestamps; never by updatedAt (ingestion moves it)
+            // or eligibilityLastCheckedAt (a "no" is re-checked every few days).
+            expect(clauses).toEqual([
+                { reviewRequestStatus: 'sent', reviewRequestLastSentAt: expect.any(Object) },
+                { reviewRequestStatus: 'failed', reviewRequestFailedAt: expect.any(Object) },
+                { reviewRequestStatus: 'not_requested', purchaseDate: expect.any(Object) },
+            ]);
+            // Unsent orders only once their request window has closed (45 days).
+            const sentWeek = clauses[0].reviewRequestLastSentAt;
+            expect(sentWeek.$gte - clauses[2].purchaseDate.$gte).toBe(45 * DAY);
+            expect(sentWeek.$lt - clauses[2].purchaseDate.$lt).toBe(45 * DAY);
+        });
+
+        it('builds the funnel from the final results', async () => {
+            ReviewOrder.aggregate.mockResolvedValue([{
+                sent: 60, alreadyRequested: 4, failed: 2, closedNotAllowed: 28, closedNotSent: 3, closed: 41,
+            }]);
+
+            const report = await build();
+            const s = stats(report);
+
+            expect(s['Requests sent']).toBe(60);
+            expect(s['Already requested']).toBe(4);
+            expect(s['Failed']).toBe(2);
+            expect(s['Eligible']).toBe(69);           // 60 + 4 + 2 + 3
+            expect(s['Orders checked']).toBe(97);     // eligible + 28 Amazon refused
+            expect(s['Not eligible']).toBe(28);       // only what Amazon refused
+            expect(s['Never checked']).toBe(10);      // 41 closed - 28 - 3, never called "not eligible"
+            expect(report.insight).toBe('60 requests sent this week');
+            expect(report.tone).toBe('watch');
+        });
+
+        it('says so when automatic requests are switched off', async () => {
+            autoSend(false);
+            const report = await build();
+
+            expect(report.available).toBe(true);
+            expect(report.caveats.join(' ')).toMatch(/switched off/);
+        });
+
+        it('flags stale order data, and stays quiet when it is recent', async () => {
+            newestOrderAt(daysAgo(20));
+            expect((await build()).caveats.join(' ')).toMatch(/not been imported yet/);
+
+            newestOrderAt(daysAgo(2));
+            expect((await build()).caveats).toEqual([]);
         });
 
         it('is unavailable only when there is genuinely no order at all', async () => {
             newestOrderAt(null);
-            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'review-requests');
+            const report = await build();
 
             expect(report.available).toBe(false);
             expect(report.reason).toMatch(/no orders have been ingested/i);
         });
 
-        it('builds the funnel from request status counts', async () => {
-            ReviewOrder.countDocuments.mockResolvedValue(100);
-            ReviewOrder.aggregate.mockResolvedValue([
-                { _id: 'sent', count: 60, eligible: 60 },
-                { _id: 'not_requested', count: 30, eligible: 10 },
-                { _id: 'failed', count: 10, eligible: 10 },
-            ]);
-
-            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'review-requests');
-            const stat = (label) => report.summary.stats.find((item) => item.label === label).value;
-
-            expect(stat('Orders checked')).toBe(100);
-            expect(stat('Requests sent')).toBe(60);
-            expect(stat('Failed')).toBe(10);
-            expect(stat('Eligible')).toBe(80);
-            expect(stat('Ineligible')).toBe(20);   // checked minus eligible
-            expect(report.insight).toBe('60 requests sent, 40 skipped');
-        });
-
         it('keeps the insight line grammatical for a single request', async () => {
-            ReviewOrder.countDocuments.mockResolvedValue(1);
-            ReviewOrder.aggregate.mockResolvedValue([{ _id: 'sent', count: 1, eligible: 1 }]);
-
-            const report = byKey(await getEsfReports(USER, 'US', 'NA'), 'review-requests');
-            expect(report.insight).toBe('1 request sent, 0 skipped');
+            ReviewOrder.aggregate.mockResolvedValue([{ sent: 1 }]);
+            expect((await build()).insight).toBe('1 request sent this week');
         });
     });
 

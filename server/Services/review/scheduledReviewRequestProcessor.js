@@ -19,22 +19,29 @@ const logger = require("../../utils/Logger");
  * Internally resolves seller tokens, builds awsConfig, and delegates to
  * processReviewRequests (the cursor-based sender service).
  */
-async function scheduledReviewRequestSender(userId, country, region, source) {
+async function scheduledReviewRequestSender(userId, country, region, source, { deadline = null } = {}) {
   logger.info(
     `[scheduledReviewRequestSender] Starting for user ${userId}, ${country}/${region} (source: ${source})`
   );
 
   try {
-    // 0) Check if user is authorized to send review requests (PRO/trial only)
+    // 0) Auto-send opt-in (PRO/trial plan gate + the seller's toggle). When it is off we
+    //    still ask Amazon whether each order is eligible (read-only) so the Review Requests
+    //    page shows real answers, but nothing is sent.
     const user = await User.findById(userId)
       .select({ reviewRequestAuthStatus: 1 })
       .lean();
 
-    if (!user || !user.reviewRequestAuthStatus) {
+    if (!user) {
+      logger.warn(`[scheduledReviewRequestSender] User ${userId} not found`);
+      return { success: false, error: "User not found" };
+    }
+
+    const checkOnly = !user.reviewRequestAuthStatus;
+    if (checkOnly) {
       logger.info(
-        `[scheduledReviewRequestSender] Skipping user ${userId} — reviewRequestAuthStatus is false (LITE plan)`
+        `[scheduledReviewRequestSender] reviewRequestAuthStatus is false for user ${userId} — eligibility check only, no sending`
       );
-      return { success: true, data: { skipped: true, reason: "LITE plan" }, error: null };
     }
 
     // 1) Resolve seller account and refresh token
@@ -155,10 +162,12 @@ async function scheduledReviewRequestSender(userId, country, region, source) {
       accessToken,
       awsConfig,
       credentialProvider,
+      checkOnly,
+      deadline,
     });
 
     logger.info(
-      `[scheduledReviewRequestSender] Done for user ${userId}: processed=${summary.processed}, sent=${summary.sent}, failed=${summary.failed}`
+      `[scheduledReviewRequestSender] Done for user ${userId}: processed=${summary.processed}, sent=${summary.sent}, eligibleFound=${summary.eligibleFound}, checkErrors=${summary.checkErrors}, failed=${summary.failed}, checkOnly=${checkOnly}`
     );
 
     return { success: true, data: summary, error: null };

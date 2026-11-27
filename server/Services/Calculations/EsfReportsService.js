@@ -50,6 +50,9 @@ const CompetitiveOffers = require('../../models/products/CompetitiveOffersModel.
 const SuppressedListings = require('../../models/products/SuppressedListingsModel.js');
 const RemovalOrders = require('../../models/inventory/RemovalOrdersModel.js');
 const ReviewOrder = require('../../models/review/ReviewOrderModel.js');
+const User = require('../../models/user-auth/userModel.js');
+const { ORDER_CONFIG, SENT_EXTERNALLY_NOTE } = require('../review/orders.js');
+const { lastRunFor } = require('../BackgroundJobs/esfReportsSchedule.js');
 const SalesOnlyMetrics = require('../../models/MCP/SalesOnlyMetricsModel.js');
 const DailySkuFinance = require('../../models/finance/DailySkuFinanceModel.js');
 const { getTotals: getFinanceTotals } = require('../Finance/FinanceDashboardReadService.js');
@@ -1604,16 +1607,39 @@ const buildListingsAudit = async (userId, country, region) => {
 const REPORT_REVIEWS = { key: 'review-requests', name: 'Review Requests', cadence: 'WEEKLY', format: 'docx', tableTitle: 'Review request funnel' };
 
 /**
- * The review funnel, counted over the last 7 days of orders. Every number here
- * is a count of ReviewOrder documents by reviewRequestStatus / canRequestReview,
- * which is exactly how the request processor records its own work.
+ * The review-request results of ONE reporting week, with every order counted exactly once.
+ *
+ * The week is fixed to the weekly mail schedule: it ends at the most recent scheduled send
+ * (Saturday 08:00 by default) and starts 7 days earlier. Consecutive editions meet exactly,
+ * so nothing is reported twice and nothing falls between two reports, however late a run
+ * starts or how often it is retried or test-sent.
+ *
+ * An order is counted in the week its FINAL result became known, and never again:
+ *   - request sent by SellerQI          -> week of reviewRequestLastSentAt
+ *   - already requested (Seller Central) -> week of reviewRequestLastSentAt
+ *   - failed                             -> week of reviewRequestFailedAt
+ *   - window closed without a request    -> week the order turned maxOrderAgeDays old, split
+ *     into "Amazon never allowed it", "allowed but not sent" and "never checked".
+ * Orders still inside their window are not counted yet: an order Amazon said "no" to is
+ * re-checked every few days, and counting those checks would repeat it week after week.
+ *
+ * (Counting orders PURCHASED in the week, as this used to, showed a fraction of the requests
+ * really sent: Amazon only allows a request from about 5 days after delivery.)
  */
-const buildReviewRequests = async (userId, country, region) => {
-    // Anchor the week on the most recent order we hold, NOT on today. Review
-    // ingestion is scheduled and rate-limited, and an account can easily go
-    // weeks between runs — anchoring on today reported "no orders" for accounts
-    // holding tens of thousands of them, purely because the newest was 8 days
-    // old. This is the latest edition of a weekly report, not a live feed.
+const REVIEW_WEEK_DAYS = 7;
+
+/**
+ * [start, end) of the reporting week: the 7 whole UTC days before the day of the latest
+ * weekly send. Whole days so the dates printed on the report are exactly what it counts
+ * (a send-time boundary like Sat 08:00 would make "14-20 Nov" quietly include 21 Nov).
+ */
+const reviewReportWeek = (now = new Date()) => {
+    const lastSend = lastRunFor('weekly', { now }) || now;
+    const end = new Date(`${toYmd(lastSend)}T00:00:00.000Z`);
+    return { start: addDays(end, -REVIEW_WEEK_DAYS), end };
+};
+
+const buildReviewRequests = async (userId, country, region, { now = new Date() } = {}) => {
     const newest = await ReviewOrder.findOne({ User: userId, country, region })
         .sort({ purchaseDate: -1 })
         .select('purchaseDate')
@@ -1623,55 +1649,98 @@ const buildReviewRequests = async (userId, country, region) => {
         return unavailable(REPORT_REVIEWS, 'No orders have been ingested for review requests yet.');
     }
 
-    const anchor = new Date(`${toYmd(new Date(newest.purchaseDate))}T00:00:00.000Z`);
-    const since = addDays(anchor, -7);
-    // Flagged when the newest order is well behind today, so a stale edition is
-    // never mistaken for this week's.
-    const daysBehind = Math.round((utcToday() - anchor) / 86400000);
+    const { start, end } = reviewReportWeek(now);
+    const newestOrderDay = new Date(`${toYmd(new Date(newest.purchaseDate))}T00:00:00.000Z`);
+    // Orders newer than this are not in SellerQI yet, so they cannot have been handled.
+    const daysBehind = Math.round((utcToday() - newestOrderDay) / 86400000);
 
-    const [counts, totalOrders] = await Promise.all([
+    // Orders whose request window closed during the week: purchased exactly
+    // maxOrderAgeDays before it. The sender never looks at them again.
+    const closedFrom = addDays(start, -ORDER_CONFIG.maxOrderAgeDays);
+    const closedTo = addDays(end, -ORDER_CONFIG.maxOrderAgeDays);
+
+    const inWeek = { $gte: start, $lt: end };
+    const between = (field, from, to) => ({ $and: [{ $gte: [field, from] }, { $lt: [field, to] }] });
+    const sentInWeek = { $and: [
+        { $eq: ['$reviewRequestStatus', 'sent'] },
+        between('$reviewRequestLastSentAt', start, end),
+    ] };
+    const isExternal = { $eq: ['$reviewRequestError', SENT_EXTERNALLY_NOTE] };
+    const closedInWeek = { $and: [
+        { $eq: ['$reviewRequestStatus', 'not_requested'] },
+        between('$purchaseDate', closedFrom, closedTo),
+    ] };
+    const count = (cond) => ({ $sum: { $cond: [cond, 1, 0] } });
+
+    const [[week = {}] = [], user] = await Promise.all([
         ReviewOrder.aggregate([
-            { $match: { User: toObjectId(userId), country, region, purchaseDate: { $gte: since } } },
+            {
+                $match: {
+                    User: toObjectId(userId),
+                    country,
+                    region,
+                    $or: [
+                        { reviewRequestStatus: 'sent', reviewRequestLastSentAt: inWeek },
+                        { reviewRequestStatus: 'failed', reviewRequestFailedAt: inWeek },
+                        { reviewRequestStatus: 'not_requested', purchaseDate: { $gte: closedFrom, $lt: closedTo } },
+                    ],
+                },
+            },
             {
                 $group: {
-                    _id: '$reviewRequestStatus',
-                    count: { $sum: 1 },
-                    eligible: { $sum: { $cond: [{ $eq: ['$canRequestReview', true] }, 1, 0] } },
+                    _id: null,
+                    sent: count({ $and: [sentInWeek, { $not: [isExternal] }] }),
+                    alreadyRequested: count({ $and: [sentInWeek, isExternal] }),
+                    failed: count({ $and: [
+                        { $eq: ['$reviewRequestStatus', 'failed'] },
+                        between('$reviewRequestFailedAt', start, end),
+                    ] }),
+                    closedNotAllowed: count({ $and: [closedInWeek, { $eq: ['$canRequestReview', false] }] }),
+                    closedNotSent: count({ $and: [closedInWeek, { $eq: ['$canRequestReview', true] }] }),
+                    closed: count(closedInWeek),
                 },
             },
         ]),
-        ReviewOrder.countDocuments({ User: userId, country, region, purchaseDate: { $gte: since } }),
+        User.findById(userId).select('reviewRequestAuthStatus').lean(),
     ]);
 
-    if (!totalOrders) {
-        return unavailable(REPORT_REVIEWS, 'No orders have been ingested for review requests yet.');
+    const sent = week.sent || 0;
+    const alreadyRequested = week.alreadyRequested || 0;
+    const failed = week.failed || 0;
+    const closedNotAllowed = week.closedNotAllowed || 0;
+    const closedNotSent = week.closedNotSent || 0;
+    // Never asked: canRequestReview still null (or missing).
+    const closedUnchecked = Math.max((week.closed || 0) - closedNotAllowed - closedNotSent, 0);
+    // Every order with a final result this week that Amazon was asked about.
+    const eligible = sent + alreadyRequested + failed + closedNotSent;
+    const checked = eligible + closedNotAllowed;
+    const autoSendOn = !!user?.reviewRequestAuthStatus;
+    const lastDay = addDays(end, -1);
+
+    const caveats = [];
+    if (!autoSendOn) {
+        caveats.push('Automatic review requests are switched off for this account, so SellerQI does not send any requests.');
     }
-
-    const byStatus = Object.fromEntries(counts.map((row) => [row._id || 'not_requested', row.count]));
-    const eligible = counts.reduce((sum, row) => sum + row.eligible, 0);
-
-    const sent = byStatus.sent || 0;
-    const queued = byStatus.queued || 0;
-    const failed = byStatus.failed || 0;
-    const notRequested = byStatus.not_requested || 0;
-    // Everything Amazon would not accept a request for: checked, but ineligible.
-    const ineligible = Math.max(totalOrders - eligible, 0);
+    if (daysBehind > 10) {
+        caveats.push(`The newest order SellerQI holds is from ${formatDate(newestOrderDay)}, ${daysBehind} days ago - orders after that have not been imported yet, so they are not counted.`);
+    }
 
     return {
         ...REPORT_REVIEWS,
         available: true,
-        date: `Week of ${formatDate(since)}`,
-        generatedAt: anchor,
+        date: `Week of ${formatDate(start)}`,
+        generatedAt: end,
         tone: failed > 0 ? 'watch' : 'neutral',
-        insight: `${plural(sent, 'request')} sent, ${notRequested + failed} skipped`,
+        insight: `${plural(sent, 'request')} sent this week`,
         summary: {
-            headline: `${totalOrders} orders checked in the week to ${formatDate(anchor)}`,
+            headline: `${plural(sent, 'review request')} sent from ${formatDate(start)} to ${formatDate(lastDay)}`,
             stats: [
-                { label: 'Orders checked', value: totalOrders },
+                { label: 'Orders checked', value: checked },
                 { label: 'Eligible', value: eligible },
                 { label: 'Requests sent', value: sent, tone: 'good' },
-                { label: 'Queued', value: queued },
-                { label: 'Ineligible', value: ineligible },
+                { label: 'Already requested', value: alreadyRequested },
+                { label: 'Not eligible', value: closedNotAllowed },
+                { label: 'Never checked', value: closedUnchecked, tone: closedUnchecked > 0 ? 'watch' : 'good' },
                 { label: 'Failed', value: failed, tone: failed > 0 ? 'watch' : 'good' },
             ],
             columns: [
@@ -1680,26 +1749,38 @@ const buildReviewRequests = async (userId, country, region) => {
                 { key: 'note', label: 'Note' },
             ],
             rows: [
-                { stage: 'Orders checked', orders: totalOrders, note: 'Shipped orders inside the ingestion window' },
-                { stage: 'Eligible to request', orders: eligible, note: 'Amazon accepted a solicitation for these' },
-                { stage: 'Requests sent', orders: sent, note: 'Delivered to Amazon successfully' },
-                { stage: 'Queued', orders: queued, note: 'Waiting for the next send window' },
-                { stage: 'Ineligible', orders: ineligible, note: 'Outside the 5–30 day window, or already requested' },
-                { stage: 'Failed', orders: failed, note: 'Rejected by Amazon or errored on send' },
+                { stage: 'Orders checked', orders: checked, note: 'Orders with a final result this week that were checked with Amazon' },
+                { stage: 'Eligible', orders: eligible, note: 'Amazon allowed a review request' },
+                { stage: 'Requests sent', orders: sent, note: 'Sent by SellerQI and accepted by Amazon this week' },
+                { stage: 'Already requested', orders: alreadyRequested, note: 'Amazon said it was already requested, e.g. by hand in Seller Central' },
+                { stage: 'Eligible, not sent', orders: closedNotSent, note: autoSendOn ? 'Request window closed before it was sent' : 'Automatic requests are switched off' },
+                { stage: 'Not eligible', orders: closedNotAllowed, note: 'Request window closed; Amazon never allowed a request for these' },
+                { stage: 'Never checked', orders: closedUnchecked, note: 'Request window closed before the order was checked with Amazon' },
+                { stage: 'Failed', orders: failed, note: 'Amazon rejected the send or it errored' },
             ],
         },
         highlights: [
-            highlight(`${plural(sent, 'review request')} sent from ${totalOrders} orders checked in the week to ${formatDate(anchor)}.`, sent ? 'good' : 'neutral'),
             highlight(
-                `${ineligible} orders were not eligible - typically outside Amazon's 5 to 30 day solicitation window, or already requested.`
+                `${plural(sent, 'review request')} sent between ${formatDate(start)} and ${formatDate(lastDay)}.`,
+                sent ? 'good' : 'neutral'
             ),
+            ...(alreadyRequested
+                ? [highlight(`${plural(alreadyRequested, 'order')} had already been requested, e.g. by hand in Seller Central.`)]
+                : []),
+            ...(closedNotAllowed
+                ? [highlight(`For ${plural(closedNotAllowed, 'order')} whose request window closed this week, Amazon never allowed a request.`)]
+                : []),
+            ...(closedNotSent && !autoSendOn
+                ? [highlight(`${plural(closedNotSent, 'order')} could have been sent a review request if automatic requests were switched on.`, 'watch')]
+                : []),
+            ...(closedUnchecked
+                ? [highlight(`${plural(closedUnchecked, 'order')} reached the end of the request window without being checked.`, 'watch')]
+                : []),
             ...(failed
-                ? [highlight(`${plural(failed, 'request')} failed on send and should be retried.`, 'watch')]
+                ? [highlight(`${plural(failed, 'request')} failed on send.`, 'watch')]
                 : []),
         ],
-        caveats: daysBehind > 10
-            ? [`This is the most recent week with order data. The newest order we hold is from ${formatDate(anchor)}, ${daysBehind} days ago - order ingestion has not run since.`]
-            : [],
+        caveats,
     };
 };
 
@@ -2619,7 +2700,9 @@ const historyBuilders = {
     },
 
     [REPORT_REVIEWS.key]: async (userId, country, region) => {
-        // Orders grouped into weeks — one week is one edition.
+        // Orders grouped by the week they were PURCHASED — one week is one edition. Requests
+        // for a week's orders go out 1-4 weeks later, so the newest editions keep growing.
+        // Orders already requested in Seller Central are not counted as sent by SellerQI.
         const rows = await ReviewOrder.aggregate([
             { $match: { User: toObjectId(userId), country, region, purchaseDate: { $ne: null } } },
             {
@@ -2627,7 +2710,10 @@ const historyBuilders = {
                     _id: { $dateToString: { format: '%G-W%V', date: '$purchaseDate' } },
                     weekStart: { $min: '$purchaseDate' },
                     orders: { $sum: 1 },
-                    sent: { $sum: { $cond: [{ $eq: ['$reviewRequestStatus', 'sent'] }, 1, 0] } },
+                    sent: { $sum: { $cond: [{ $and: [
+                        { $eq: ['$reviewRequestStatus', 'sent'] },
+                        { $ne: ['$reviewRequestError', SENT_EXTERNALLY_NOTE] },
+                    ] }, 1, 0] } },
                     failed: { $sum: { $cond: [{ $eq: ['$reviewRequestStatus', 'failed'] }, 1, 0] } },
                 },
             },
@@ -2638,7 +2724,7 @@ const historyBuilders = {
 
         const editions = rows.map((row) => edition(
             row.weekStart,
-            `${plural(row.sent, 'request')} sent from ${plural(row.orders, 'order')} checked`,
+            `${plural(row.sent, 'request')} sent for ${plural(row.orders, 'order')} placed that week`,
             row.failed > 0 ? 'watch' : 'neutral'
         )).filter(Boolean);
 
@@ -2646,7 +2732,7 @@ const historyBuilders = {
             editions,
             stats: [
                 { label: 'Requests sent', value: rows.reduce((n, r) => n + r.sent, 0) },
-                { label: 'Orders checked', value: rows.reduce((n, r) => n + r.orders, 0) },
+                { label: 'Orders placed', value: rows.reduce((n, r) => n + r.orders, 0) },
                 { label: 'Weeks on file', value: rows.length },
             ],
         };
@@ -2776,7 +2862,9 @@ module.exports = {
     takeawayOf,
     formatDate,
     printableMoney: cash,
-    // exported for tests
+    // exported for tests and scripts/verifyEsfReportData.js
+    buildReviewRequests,
+    reviewReportWeek,
     num,
     pctChange,
     PREVIEW_ROWS,

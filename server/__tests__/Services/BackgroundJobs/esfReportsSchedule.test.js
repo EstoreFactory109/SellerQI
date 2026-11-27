@@ -42,6 +42,27 @@ const THURSDAY = new Date('2026-10-01T12:00:00Z');
 const ALL_KEYS = ['account-overview', 'buybox', 'review-requests', 'inventory-restock',
     'fba-aged-inventory', 'monthly-performance', 'listings-audit'];
 
+describe('lastRunFor', () => {
+    // The review report covers the 7 days up to this instant, so consecutive editions meet
+    // exactly: no order is reported twice, none falls between two reports.
+    test('from a Thursday it is the PREVIOUS Saturday send', () => {
+        expect(schedule.lastRunFor('weekly', { now: THURSDAY }).toISOString())
+            .toBe('2026-09-26T08:00:00.000Z');
+    });
+
+    test('a run starting on the dot, or late, still ends its week at its own send time', () => {
+        for (const at of ['2026-10-03T08:00:00Z', '2026-10-03T08:00:30Z', '2026-10-03T14:00:00Z', '2026-10-09T23:59:00Z']) {
+            expect(schedule.lastRunFor('weekly', { now: new Date(at) }).toISOString())
+                .toBe('2026-10-03T08:00:00.000Z');
+        }
+    });
+
+    test('an unreadable override gives null instead of throwing', () => {
+        process.env.ESF_REPORTS_WEEKLY_CRON = 'not a cron';
+        expect(schedule.lastRunFor('weekly', { now: THURSDAY })).toBeNull();
+    });
+});
+
 describe('nextRunFor', () => {
     test('weekly from a Thursday is the coming SATURDAY, as an instant', () => {
         expect(schedule.nextRunFor('weekly', { now: THURSDAY }).toISOString())

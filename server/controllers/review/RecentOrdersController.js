@@ -11,13 +11,30 @@ const ELIGIBILITY_FRESH_DAYS = 3;
 
 // The window the sender works in (Services/review/orders.js), by order age.
 const { ORDER_CONFIG } = require("../../Services/review/orders.js");
+const { isPermanentRefusal } = require("../../Services/review/reviewRequestEligibility.js");
+
+/**
+ * Pure: what SellerQI knows about whether a request can be sent, as three states:
+ * - "eligible":   Amazon said a request can be sent
+ * - "ineligible": Amazon was asked and said no (or answered with an error)
+ * - "unchecked":  Amazon has not been asked about this order yet
+ * `canRequestReview` alone cannot tell the last two apart (both are falsy), which made
+ * never-checked orders look like "Amazon said no".
+ * @param {Object} order - ReviewOrder fields
+ * @returns {"eligible"|"ineligible"|"unchecked"}
+ */
+function reviewEligibilityState(order) {
+  if (order?.canRequestReview === true) return "eligible";
+  if (order?.eligibilityLastCheckedAt) return "ineligible";
+  return "unchecked";
+}
 
 /**
  * Pure: why a review request can't be sent for this order, in the seller's words, or
  * null when it can. Amazon gives a reason only for some orders (as an error on the
  * eligibility check); otherwise the reason comes from what SellerQI knows: the order's
- * age, whether it was checked with Amazon, and whether auto-send is on (eligibility is
- * only checked for accounts with auto-send on, for orders 5-30 days old).
+ * age and whether it was checked with Amazon (eligibility is checked daily for orders
+ * 5-45 days old, whether or not auto-send is on; only the sending needs auto-send).
  * @param {Object} order - ReviewOrder fields
  * @param {{now?: Date, autoSend?: boolean}} [ctx]
  * @returns {string|null}
@@ -34,19 +51,19 @@ function reviewIneligibleReason(order, { now = new Date(), autoSend = false } = 
   if (order.canRequestReview === true) return null;
 
   const error = String(order.eligibilityResponse?.errors?.[0]?.message || "");
-  if (/multi-channel/i.test(error)) return "Multi-channel order: Amazon doesn't allow review requests";
+  if (isPermanentRefusal(order.eligibilityResponse)) return "Multi-channel order: Amazon doesn't allow review requests";
   if (/denied|unauthori[sz]ed/i.test(error)) return "Amazon refused access for this account";
   if (error) return `Amazon said: ${error.slice(0, 140)}`;
 
   const ageDays = order.purchaseDate ? (now.getTime() - new Date(order.purchaseDate).getTime()) / DAY_MS : null;
   if (ageDays !== null && ageDays < ORDER_CONFIG.minOrderAgeDays) return "Too early: requests open 5 days after delivery";
-  if (ageDays !== null && ageDays > ORDER_CONFIG.maxOrderAgeDays) return "Past the 30-day request window";
+  if (ageDays !== null && ageDays > ORDER_CONFIG.maxOrderAgeDays) return "Past the request window (Amazon closes it 30 days after delivery)";
   if (order.eligibilityLastCheckedAt) {
     return "Amazon allows no request for this order right now (already requested in Seller Central, or not delivered yet)";
   }
   return autoSend
     ? "Waiting for SellerQI's next check with Amazon"
-    : "Not checked with Amazon: turn on Auto review requests";
+    : "Waiting for SellerQI's next check with Amazon. Turn on Auto review requests to have eligible orders sent automatically";
 }
 
 /**
@@ -142,6 +159,7 @@ const getRecentOrders = async (req, res) => {
     const autoSend = !!owner?.reviewRequestAuthStatus;
     const orders = rawOrders.map(({ eligibilityResponse, eligibilityLastCheckedAt, reviewRequestError, ...o }) => ({
       ...o,
+      eligibilityState: reviewEligibilityState({ ...o, eligibilityLastCheckedAt }),
       notEligibleReason: reviewIneligibleReason(
         { ...o, eligibilityResponse, eligibilityLastCheckedAt, reviewRequestError },
         { now, autoSend }
@@ -340,9 +358,9 @@ const toggleReviewAuthStatus = async (req, res) => {
  *
  * The four numbers at the top of the Review Requests page, for this marketplace:
  * - eligibleNow: Amazon allows a request (recent eligibility check) and none was sent
- * - inWindowUnchecked: orders in the request window by date (7-33 days old) that were
- *   never checked with Amazon (eligibility is checked only for some accounts and
- *   orders), shown as "may be eligible", never as confirmed
+ * - inWindowUnchecked: orders inside the order-age window (ORDER_CONFIG, 5-45 days old)
+ *   that were never checked with Amazon yet, shown as "may be eligible", never as
+ *   confirmed
  * - requestedThisMonth: requests sent since the 1st (UTC)
  * - ratingsThisMonth: new ratings on the seller's products since the 1st, from the
  *   weekly ratings snapshots (Amazon does not link a review to an order); null when
@@ -373,7 +391,10 @@ const getReviewSummary = async (req, res) => {
       }),
       ReviewOrder.countDocuments({
         ...base,
-        purchaseDate: { $gte: new Date(now.getTime() - 33 * DAY_MS), $lt: new Date(now.getTime() - 7 * DAY_MS) },
+        purchaseDate: {
+          $gte: new Date(now.getTime() - ORDER_CONFIG.maxOrderAgeDays * DAY_MS),
+          $lt: new Date(now.getTime() - ORDER_CONFIG.minOrderAgeDays * DAY_MS),
+        },
         reviewRequestStatus: neverSent,
         eligibilityLastCheckedAt: null,
       }),
@@ -418,6 +439,7 @@ const getReviewSummary = async (req, res) => {
 module.exports = {
   getReviewSummary,
   reviewIneligibleReason,
+  reviewEligibilityState,
   newRatingsBetween,
   getRecentOrders,
   getOrderItems,

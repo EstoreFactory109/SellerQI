@@ -133,6 +133,31 @@ const nextRunFor = (cadence, { now = new Date() } = {}) => {
     }
 };
 
+/**
+ * The most recent instant a cadence's cron fired (or is firing right now).
+ *
+ * Reports use it as the END of the period they cover, so consecutive editions meet exactly
+ * and never overlap, however late a run starts or however often it is retried or test-sent.
+ * `now` is nudged forward a minute so a run that starts on the dot counts its own fire time,
+ * not last week's (cron-parser's prev() is strictly earlier than currentDate).
+ *
+ * @returns {Date|null} null when the expression cannot be parsed.
+ */
+const lastRunFor = (cadence, { now = new Date() } = {}) => {
+    const expression = scheduleFor(cadence);
+    if (!expression) return null;
+    try {
+        const iterator = parseExpression(expression, {
+            currentDate: new Date(now.getTime() + 60 * 1000),
+            tz: schedulerTimezone(),
+        });
+        return iterator.prev().toDate();
+    } catch (error) {
+        logger.warn(`[EsfReportsSchedule] cannot read the ${cadence} cron ("${expression}"): ${error.message}`);
+        return null;
+    }
+};
+
 /** Every cadence that will fire, soonest first. Unparseable ones are dropped. */
 const upcomingRuns = ({ now = new Date() } = {}) =>
     Object.keys(CADENCE_GROUPS)
@@ -196,6 +221,7 @@ module.exports = {
     schedulerTimezone,
     isMailerEnabled,
     nextRunFor,
+    lastRunFor,
     upcomingRuns,
     nextScheduledReport,
 };
